@@ -10,9 +10,10 @@ import {
   IconSettings,
   IconSparkles,
   IconTools,
+  IconApps,
 } from "@tabler/icons-react"
 import { Link, useRouterState } from "@tanstack/react-router"
-import * as React from "react"
+import React from "react"
 import { useTranslation } from "react-i18next"
 
 import {
@@ -33,6 +34,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import { useSidebarChannels } from "@/hooks/use-sidebar-channels"
+import { getExternalApps } from "@/api/external-apps"
 
 interface NavItem {
   title: string
@@ -46,6 +48,12 @@ interface NavGroup {
   defaultOpen: boolean
   items: NavItem[]
   isChannelsGroup?: boolean
+}
+
+interface ExternalApp {
+  id: string
+  name: string
+  icon?: string
 }
 
 const baseNavGroups: Omit<NavGroup, "items">[] = [
@@ -72,6 +80,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const { i18n, t } = useTranslation()
   const { isMobile, setOpenMobile } = useSidebar()
   const currentPath = routerState.location.pathname
+  const [externalApps, setExternalApps] = React.useState<ExternalApp[]>([])
   const {
     channelItems,
     hasMoreChannels,
@@ -82,14 +91,32 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     t,
   })
 
+  // Load external apps on mount
+  React.useEffect(() => {
+    const loadExternalApps = async () => {
+      try {
+        const apps = await getExternalApps()
+        setExternalApps(apps || [])
+      } catch (err) {
+        console.error("Failed to load external apps:", err)
+      }
+    }
+    loadExternalApps()
+  }, [])
+
   const handleNavItemClick = React.useCallback(() => {
     if (isMobile) {
       setOpenMobile(false)
     }
   }, [isMobile, setOpenMobile])
 
+  const getIconForApp = (iconName?: string) => {
+    // Returns IconApps as default, could be extended with more icon mappings
+    return IconApps
+  }
+
   const navGroups: NavGroup[] = React.useMemo(() => {
-    return [
+    const groups: NavGroup[] = [
       {
         ...baseNavGroups[0],
         items: [
@@ -170,7 +197,23 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         ],
       },
     ]
-  }, [channelItems])
+
+    // Add external apps group if any apps are configured
+    if (externalApps.length > 0) {
+      groups.push({
+        label: "navigation.applications",
+        defaultOpen: true,
+        items: externalApps.map((app) => ({
+          title: app.name,
+          url: `/app/${app.id}`,
+          icon: getIconForApp(app.icon),
+          translateTitle: false,
+        })),
+      })
+    }
+
+    return groups
+  }, [channelItems, externalApps])
 
   return (
     <Sidebar

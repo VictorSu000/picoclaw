@@ -1,0 +1,23 @@
+{
+  "port": 18800,
+  "public": false,
+  "allowed_cidrs": [],
+  "external_apps": [
+    {
+      "id": "analytics",
+      "name": "数据分析",
+      "base_path": "/opt/analytics/web",
+      "backend_url": "http://localhost:8888",
+      "proxy_path": "/api/external/analytics",
+      "icon": "chart"
+    },
+    {
+      "id": "dashboard",
+      "name": "仪表板",
+      "base_path": "/opt/dashboard/web",
+      "backend_url": "http://localhost:8889",
+      "proxy_path": "/api/external/dashboard",
+      "icon": "gauge"
+    }
+  ]
+}

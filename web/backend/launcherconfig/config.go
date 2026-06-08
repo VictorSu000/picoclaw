@@ -18,15 +18,26 @@ const (
 	EnvLauncherHost = "PICOCLAW_LAUNCHER_HOST"
 )
 
+// ExternalApp defines an external application to be served via the launcher.
+type ExternalApp struct {
+	ID          string `json:"id"`           // Unique identifier for the app
+	Name        string `json:"name"`         // Display name for sidebar menu
+	BasePath    string `json:"base_path"`    // OS path to the frontend files
+	BackendURL  string `json:"backend_url"`  // URL of the app's independent backend
+	ProxyPath   string `json:"proxy_path"`   // Proxy route prefix (e.g. /api/external/myapp)
+	Icon        string `json:"icon,omitempty"` // Optional: icon identifier for menu
+}
+
 // Config stores launch parameters for the web backend service.
 type Config struct {
-	Port                  int      `json:"port"`
-	Public                bool     `json:"public"`
-	AllowedCIDRs          []string `json:"allowed_cidrs,omitempty"`
-	DashboardPasswordHash string   `json:"dashboard_password_hash,omitempty"`
+	Port                  int            `json:"port"`
+	Public                bool           `json:"public"`
+	AllowedCIDRs          []string       `json:"allowed_cidrs,omitempty"`
+	DashboardPasswordHash string         `json:"dashboard_password_hash,omitempty"`
 	// LegacyLauncherToken is read only for one-time migration from the removed
 	// token login flow. Save always clears it so new configs do not persist it.
-	LegacyLauncherToken string `json:"launcher_token,omitempty"`
+	LegacyLauncherToken string          `json:"launcher_token,omitempty"`
+	ExternalApps        []ExternalApp   `json:"external_apps,omitempty"`
 }
 
 // Default returns default launcher settings.
@@ -42,6 +53,23 @@ func Validate(cfg Config) error {
 	for _, cidr := range cfg.AllowedCIDRs {
 		if _, _, err := net.ParseCIDR(cidr); err != nil {
 			return fmt.Errorf("invalid CIDR %q", cidr)
+		}
+	}
+	for _, app := range cfg.ExternalApps {
+		if strings.TrimSpace(app.ID) == "" {
+			return fmt.Errorf("external app: id cannot be empty")
+		}
+		if strings.TrimSpace(app.Name) == "" {
+			return fmt.Errorf("external app %q: name cannot be empty", app.ID)
+		}
+		if strings.TrimSpace(app.BasePath) == "" {
+			return fmt.Errorf("external app %q: base_path cannot be empty", app.ID)
+		}
+		if strings.TrimSpace(app.BackendURL) == "" {
+			return fmt.Errorf("external app %q: backend_url cannot be empty", app.ID)
+		}
+		if strings.TrimSpace(app.ProxyPath) == "" {
+			return fmt.Errorf("external app %q: proxy_path cannot be empty", app.ID)
 		}
 	}
 	return nil
