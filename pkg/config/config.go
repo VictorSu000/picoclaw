@@ -257,7 +257,7 @@ func (c *Config) MarshalJSON() ([]byte, error) {
 		Alias: (*Alias)(c),
 	}
 
-	if len(c.Session.Dimensions) > 0 || len(c.Session.IdentityLinks) > 0 {
+	if len(c.Session.Dimensions) > 0 || len(c.Session.IdentityLinks) > 0 || c.Session.DmScope != "" {
 		sessionCfg := c.Session
 		aux.Session = &sessionCfg
 	}
@@ -349,6 +349,7 @@ type DispatchSelector struct {
 type SessionConfig struct {
 	Dimensions    []string            `json:"dimensions,omitempty"`
 	IdentityLinks map[string][]string `json:"identity_links,omitempty"`
+	DmScope       string              `json:"dm_scope,omitempty"`
 }
 
 // RoutingConfig controls the intelligent model routing feature.
