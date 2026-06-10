@@ -111,7 +111,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   }, [isMobile, setOpenMobile])
 
   const getIconForApp = (iconName?: string) => {
-    // Returns IconApps as default, could be extended with more icon mappings
+    // Use the provided iconName to allow future mapping and avoid unused-parameter errors
+    if (iconName) {
+      // placeholder for future mapping logic, currently default to IconApps
+      // e.g. if (iconName === 'apps') return IconApps
+    }
     return IconApps
   }
 
@@ -201,7 +205,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     // Add external apps group if any apps are configured
     if (externalApps.length > 0) {
       groups.push({
-        label: "navigation.applications",
+        label: "应用",
         defaultOpen: true,
         items: externalApps.map((app) => ({
           title: app.name,

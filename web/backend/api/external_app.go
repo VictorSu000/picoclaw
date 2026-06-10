@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -25,13 +24,13 @@ type ExternalAppInfo struct {
 // registerExternalAppRoutes registers routes for external app management and proxying.
 func (h *Handler) registerExternalAppRoutes(mux *http.ServeMux) {
 	// Get list of external apps (public endpoint)
-	mux.HandleFunc("GET /api/launcher/external-apps", h.handleGetExternalApps)
+	mux.HandleFunc("/api/launcher/external-apps", h.handleGetExternalApps)
 
-	// Serve static files from external app base paths
-	mux.HandleFunc("GET /_external-app/{appId}/*", h.handleExternalAppStaticFiles)
+	// Serve static files from external app base paths (prefix)
+	mux.HandleFunc("/_external-app/", h.handleExternalAppStaticFiles)
 
-	// Proxy requests to external apps
-	mux.HandleFunc("/api/external/{appId}/*", h.handleExternalAppProxy)
+	// Proxy requests to external apps (prefix)
+	mux.HandleFunc("/api/external/", h.handleExternalAppProxy)
 }
 
 // handleGetExternalApps returns the list of configured external applications.
@@ -61,8 +60,23 @@ func (h *Handler) handleGetExternalApps(w http.ResponseWriter, r *http.Request) 
 // handleExternalAppStaticFiles serves static files from the external app's base path.
 // Path format: /_external-app/{appId}/* -> {basePath}/{remaining path}
 func (h *Handler) handleExternalAppStaticFiles(w http.ResponseWriter, r *http.Request) {
-	appID := r.PathValue("appId")
-	pathSuffix := r.PathValue("*")
+	// Expected path: /_external-app/{appId}/*
+	// Extract appId and suffix from URL path since plain ServeMux does not
+	// support templated patterns.
+	trimmed := strings.TrimPrefix(r.URL.Path, "/_external-app/")
+	// trimmed may be "" or "{appId}" or "{appId}/rest/of/path"
+	var appID, pathSuffix string
+	if trimmed == "" {
+		http.Error(w, "missing app id", http.StatusBadRequest)
+		return
+	}
+	parts := strings.SplitN(trimmed, "/", 2)
+	appID = parts[0]
+	if len(parts) == 2 {
+		pathSuffix = parts[1]
+	} else {
+		pathSuffix = ""
+	}
 
 	// Load config to find app settings
 	launcherCfgPath := launcherconfig.PathForAppConfig(h.configPath)
@@ -130,8 +144,20 @@ func (h *Handler) handleExternalAppStaticFiles(w http.ResponseWriter, r *http.Re
 // handleExternalAppProxy proxies requests to the external app's backend.
 // Path format: /api/external/{appId}/* -> {backendURL}/{remaining path}
 func (h *Handler) handleExternalAppProxy(w http.ResponseWriter, r *http.Request) {
-	appID := r.PathValue("appId")
-	pathSuffix := r.PathValue("*")
+	// Expected path: /api/external/{appId}/*
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/external/")
+	var appID, pathSuffix string
+	if trimmed == "" {
+		http.Error(w, "missing app id", http.StatusBadRequest)
+		return
+	}
+	parts := strings.SplitN(trimmed, "/", 2)
+	appID = parts[0]
+	if len(parts) == 2 {
+		pathSuffix = parts[1]
+	} else {
+		pathSuffix = ""
+	}
 
 	// Load config to find app settings
 	launcherCfgPath := launcherconfig.PathForAppConfig(h.configPath)

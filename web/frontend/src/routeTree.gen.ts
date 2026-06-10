@@ -17,9 +17,11 @@ import { Route as CredentialsRouteImport } from './routes/credentials'
 import { Route as ConfigRouteImport } from './routes/config'
 import { Route as AgentRouteImport } from './routes/agent'
 import { Route as ChannelsRouteRouteImport } from './routes/channels/route'
+import { Route as AppRouteRouteImport } from './routes/app/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ConfigRawRouteImport } from './routes/config.raw'
 import { Route as ChannelsNameRouteImport } from './routes/channels/$name'
+import { Route as AppIdRouteImport } from './routes/app/$id'
 import { Route as AgentToolsRouteImport } from './routes/agent/tools'
 import { Route as AgentSkillsRouteImport } from './routes/agent/skills'
 import { Route as AgentHubRouteImport } from './routes/agent/hub'
@@ -64,6 +66,11 @@ const ChannelsRouteRoute = ChannelsRouteRouteImport.update({
   path: '/channels',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppRouteRoute = AppRouteRouteImport.update({
+  id: '/app',
+  path: '/app',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -78,6 +85,11 @@ const ChannelsNameRoute = ChannelsNameRouteImport.update({
   id: '/$name',
   path: '/$name',
   getParentRoute: () => ChannelsRouteRoute,
+} as any)
+const AppIdRoute = AppIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => AppRouteRoute,
 } as any)
 const AgentToolsRoute = AgentToolsRouteImport.update({
   id: '/tools',
@@ -97,6 +109,7 @@ const AgentHubRoute = AgentHubRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/app': typeof AppRouteRouteWithChildren
   '/channels': typeof ChannelsRouteRouteWithChildren
   '/agent': typeof AgentRouteWithChildren
   '/config': typeof ConfigRouteWithChildren
@@ -108,11 +121,13 @@ export interface FileRoutesByFullPath {
   '/agent/hub': typeof AgentHubRoute
   '/agent/skills': typeof AgentSkillsRoute
   '/agent/tools': typeof AgentToolsRoute
+  '/app/$id': typeof AppIdRoute
   '/channels/$name': typeof ChannelsNameRoute
   '/config/raw': typeof ConfigRawRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/app': typeof AppRouteRouteWithChildren
   '/channels': typeof ChannelsRouteRouteWithChildren
   '/agent': typeof AgentRouteWithChildren
   '/config': typeof ConfigRouteWithChildren
@@ -124,12 +139,14 @@ export interface FileRoutesByTo {
   '/agent/hub': typeof AgentHubRoute
   '/agent/skills': typeof AgentSkillsRoute
   '/agent/tools': typeof AgentToolsRoute
+  '/app/$id': typeof AppIdRoute
   '/channels/$name': typeof ChannelsNameRoute
   '/config/raw': typeof ConfigRawRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/app': typeof AppRouteRouteWithChildren
   '/channels': typeof ChannelsRouteRouteWithChildren
   '/agent': typeof AgentRouteWithChildren
   '/config': typeof ConfigRouteWithChildren
@@ -141,6 +158,7 @@ export interface FileRoutesById {
   '/agent/hub': typeof AgentHubRoute
   '/agent/skills': typeof AgentSkillsRoute
   '/agent/tools': typeof AgentToolsRoute
+  '/app/$id': typeof AppIdRoute
   '/channels/$name': typeof ChannelsNameRoute
   '/config/raw': typeof ConfigRawRoute
 }
@@ -148,6 +166,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/app'
     | '/channels'
     | '/agent'
     | '/config'
@@ -159,11 +178,13 @@ export interface FileRouteTypes {
     | '/agent/hub'
     | '/agent/skills'
     | '/agent/tools'
+    | '/app/$id'
     | '/channels/$name'
     | '/config/raw'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/app'
     | '/channels'
     | '/agent'
     | '/config'
@@ -175,11 +196,13 @@ export interface FileRouteTypes {
     | '/agent/hub'
     | '/agent/skills'
     | '/agent/tools'
+    | '/app/$id'
     | '/channels/$name'
     | '/config/raw'
   id:
     | '__root__'
     | '/'
+    | '/app'
     | '/channels'
     | '/agent'
     | '/config'
@@ -191,12 +214,14 @@ export interface FileRouteTypes {
     | '/agent/hub'
     | '/agent/skills'
     | '/agent/tools'
+    | '/app/$id'
     | '/channels/$name'
     | '/config/raw'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AppRouteRoute: typeof AppRouteRouteWithChildren
   ChannelsRouteRoute: typeof ChannelsRouteRouteWithChildren
   AgentRoute: typeof AgentRouteWithChildren
   ConfigRoute: typeof ConfigRouteWithChildren
@@ -265,6 +290,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChannelsRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/app': {
+      id: '/app'
+      path: '/app'
+      fullPath: '/app'
+      preLoaderRoute: typeof AppRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -285,6 +317,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/channels/$name'
       preLoaderRoute: typeof ChannelsNameRouteImport
       parentRoute: typeof ChannelsRouteRoute
+    }
+    '/app/$id': {
+      id: '/app/$id'
+      path: '/$id'
+      fullPath: '/app/$id'
+      preLoaderRoute: typeof AppIdRouteImport
+      parentRoute: typeof AppRouteRoute
     }
     '/agent/tools': {
       id: '/agent/tools'
@@ -309,6 +348,18 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface AppRouteRouteChildren {
+  AppIdRoute: typeof AppIdRoute
+}
+
+const AppRouteRouteChildren: AppRouteRouteChildren = {
+  AppIdRoute: AppIdRoute,
+}
+
+const AppRouteRouteWithChildren = AppRouteRoute._addFileChildren(
+  AppRouteRouteChildren,
+)
 
 interface ChannelsRouteRouteChildren {
   ChannelsNameRoute: typeof ChannelsNameRoute
@@ -349,6 +400,7 @@ const ConfigRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AppRouteRoute: AppRouteRouteWithChildren,
   ChannelsRouteRoute: ChannelsRouteRouteWithChildren,
   AgentRoute: AgentRouteWithChildren,
   ConfigRoute: ConfigRouteWithChildren,

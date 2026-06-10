@@ -6,7 +6,7 @@ export const Route = createFileRoute("/app/$id")({
 })
 
 function ExternalAppPage() {
-  const { id } = Route.useParams()
+  const { id } = Route.useParams() as { id: string }
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
 
