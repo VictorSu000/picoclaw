@@ -9,7 +9,7 @@ WORKDIR /src/web/frontend
 
 # Cache frontend dependencies
 COPY web/frontend/package.json web/frontend/pnpm-lock.yaml ./
-RUN CI=true pnpm install --frozen-lockfile
+RUN pnpm config set registry https://registry.npmmirror.com && CI=true pnpm install --frozen-lockfile
 
 # Build frontend
 COPY web/frontend/ ./
