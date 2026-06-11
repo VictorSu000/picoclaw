@@ -7,6 +7,7 @@ export interface SessionSummary {
   message_count: number
   created: string
   updated: string
+  is_favorited: boolean
 }
 
 export interface SessionDetail {
@@ -70,5 +71,23 @@ export async function deleteSession(id: string): Promise<void> {
   })
   if (!res.ok) {
     throw new Error(`Failed to delete session ${id}: ${res.status}`)
+  }
+}
+
+export async function favoriteSession(id: string): Promise<void> {
+  const res = await launcherFetch(`/api/sessions/${encodeURIComponent(id)}/favorite`, {
+    method: "POST",
+  })
+  if (!res.ok) {
+    throw new Error(`Failed to favorite session ${id}: ${res.status}`)
+  }
+}
+
+export async function unfavoriteSession(id: string): Promise<void> {
+  const res = await launcherFetch(`/api/sessions/${encodeURIComponent(id)}/favorite`, {
+    method: "DELETE",
+  })
+  if (!res.ok) {
+    throw new Error(`Failed to unfavorite session ${id}: ${res.status}`)
   }
 }

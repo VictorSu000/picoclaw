@@ -1,4 +1,4 @@
-import { IconHistory, IconTrash } from "@tabler/icons-react"
+import { IconHistory, IconTrash, IconStar } from "@tabler/icons-react"
 import dayjs from "dayjs"
 import type { RefObject } from "react"
 import { useTranslation } from "react-i18next"
@@ -23,6 +23,7 @@ interface SessionHistoryMenuProps {
   onOpenChange: (open: boolean) => void
   onSwitchSession: (sessionId: string) => void
   onDeleteSession: (sessionId: string) => void
+  onToggleFavorite: (sessionId: string, currentlyFavorited: boolean) => void
 }
 
 export function SessionHistoryMenu({
@@ -35,6 +36,7 @@ export function SessionHistoryMenu({
   onOpenChange,
   onSwitchSession,
   onDeleteSession,
+  onToggleFavorite,
 }: SessionHistoryMenuProps) {
   const { t } = useTranslation()
 
@@ -65,9 +67,8 @@ export function SessionHistoryMenu({
             sessions.map((session) => (
               <DropdownMenuItem
                 key={session.id}
-                className={`group relative my-0.5 flex flex-col items-start gap-0.5 pr-8 ${
-                  session.id === activeSessionId ? "bg-accent" : ""
-                }`}
+                className={`group relative my-0.5 flex flex-col items-start gap-0.5 pr-14 ${session.id === activeSessionId ? "bg-accent" : ""
+                  }`}
                 onClick={() => onSwitchSession(session.id)}
               >
                 <span className="line-clamp-1 text-sm font-medium">
@@ -79,6 +80,22 @@ export function SessionHistoryMenu({
                   })}{" "}
                   · {dayjs(session.updated).fromNow()}
                 </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={session.is_favorited ? t("chat.unfavoriteSession") : t("chat.favoriteSession")}
+                  className={`absolute top-1/2 right-9 h-6 w-6 -translate-y-1/2 transition-opacity ${session.is_favorited
+                    ? "opacity-100 text-muted-foreground hover:text-muted-foreground"
+                    : "opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-muted-foreground"
+                    }`}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    onToggleFavorite(session.id, session.is_favorited)
+                  }}
+                >
+                  <IconStar className="h-4 w-4" fill={session.is_favorited ? "currentColor" : "none"} />
+                </Button>
                 <Button
                   variant="ghost"
                   size="icon"

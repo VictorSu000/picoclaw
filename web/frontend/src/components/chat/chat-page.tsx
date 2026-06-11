@@ -130,14 +130,14 @@ export function ChatPage() {
     value: AssistantDetailVisibility
     label: string
   }> = [
-    { value: "none", label: t("chat.assistantDetailVisibility.none") },
-    { value: "thought", label: t("chat.assistantDetailVisibility.thought") },
-    {
-      value: "tool_calls",
-      label: t("chat.assistantDetailVisibility.toolCalls"),
-    },
-    { value: "all", label: t("chat.assistantDetailVisibility.all") },
-  ]
+      { value: "none", label: t("chat.assistantDetailVisibility.none") },
+      { value: "thought", label: t("chat.assistantDetailVisibility.thought") },
+      {
+        value: "tool_calls",
+        label: t("chat.assistantDetailVisibility.toolCalls"),
+      },
+      { value: "all", label: t("chat.assistantDetailVisibility.all") },
+    ]
 
   const {
     messages,
@@ -177,6 +177,7 @@ export function ChatPage() {
     observerRef,
     loadSessions,
     handleDeleteSession,
+    handleToggleFavorite,
   } = useSessionHistory({
     activeSessionId,
     onDeletedActiveSession: newChat,
@@ -279,9 +280,8 @@ export function ChatPage() {
     <div className="bg-background/95 flex h-full flex-col">
       <PageHeader
         title={t("navigation.chat")}
-        className={`transition-shadow ${
-          hasScrolled ? "shadow-xs" : "shadow-none"
-        }`}
+        className={`transition-shadow ${hasScrolled ? "shadow-xs" : "shadow-none"
+          }`}
         titleExtra={
           hasAvailableModels && (
             <ModelSelector
@@ -345,6 +345,7 @@ export function ChatPage() {
           }}
           onSwitchSession={switchSession}
           onDeleteSession={handleDeleteSession}
+          onToggleFavorite={handleToggleFavorite}
         />
       </PageHeader>
 

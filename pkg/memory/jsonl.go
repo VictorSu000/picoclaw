@@ -47,6 +47,7 @@ type SessionMeta struct {
 	UpdatedAt time.Time       `json:"updated_at"`
 	Scope     json.RawMessage `json:"scope,omitempty"`
 	Aliases   []string        `json:"aliases,omitempty"`
+	Favorited bool            `json:"favorited,omitempty"`
 }
 
 // JSONLStore implements Store using append-only JSONL files.

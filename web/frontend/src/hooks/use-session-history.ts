@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
-import { type SessionSummary, deleteSession, getSessions } from "@/api/sessions"
+import { type SessionSummary, deleteSession, getSessions, favoriteSession, unfavoriteSession } from "@/api/sessions"
 
 const LIMIT = 20
 
@@ -106,6 +106,29 @@ export function useSessionHistory({
     [activeSessionId, onDeletedActiveSession, sessions],
   )
 
+  const handleToggleFavorite = useCallback(
+    async (id: string, currentlFavorited: boolean) => {
+      try {
+        if (currentlFavorited) {
+          await unfavoriteSession(id)
+        } else {
+          await favoriteSession(id)
+        }
+        // Update the session in the list
+        setSessions((prev) =>
+          prev.map((s) =>
+            s.id === id ? { ...s, is_favorited: !s.is_favorited } : s,
+          ),
+        )
+        // Reload to re-sort (favorites go to top)
+        await loadSessions(true)
+      } catch (err) {
+        console.error("Failed to toggle favorite:", err)
+      }
+    },
+    [loadSessions],
+  )
+
   return {
     sessions,
     hasMore,
@@ -114,5 +137,6 @@ export function useSessionHistory({
     observerRef,
     loadSessions,
     handleDeleteSession,
+    handleToggleFavorite,
   }
 }

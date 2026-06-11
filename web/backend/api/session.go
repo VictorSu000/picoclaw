@@ -25,6 +25,8 @@ func (h *Handler) registerSessionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/sessions", h.handleListSessions)
 	mux.HandleFunc("GET /api/sessions/{id}", h.handleGetSession)
 	mux.HandleFunc("DELETE /api/sessions/{id}", h.handleDeleteSession)
+	mux.HandleFunc("POST /api/sessions/{id}/favorite", h.handleFavoriteSession)
+	mux.HandleFunc("DELETE /api/sessions/{id}/favorite", h.handleUnfavoriteSession)
 }
 
 // sessionFile mirrors the on-disk session JSON structure from pkg/session.
@@ -44,6 +46,7 @@ type sessionListItem struct {
 	MessageCount int    `json:"message_count"`
 	Created      string `json:"created"`
 	Updated      string `json:"updated"`
+	IsFavorited  bool   `json:"is_favorited"`
 }
 
 type sessionChatMessage struct {
@@ -412,7 +415,7 @@ func (h *Handler) findLegacyPicoSession(dir, sessionID string) (picoLegacySessio
 	return picoLegacySessionRef{}, os.ErrNotExist
 }
 
-func buildSessionListItem(sessionID string, sess sessionFile, toolFeedbackMaxArgsLength int) sessionListItem {
+func buildSessionListItem(sessionID string, sess sessionFile, meta memory.SessionMeta, toolFeedbackMaxArgsLength int) sessionListItem {
 	transcript := visibleSessionMessages(sess.Messages, toolFeedbackMaxArgsLength)
 
 	preview := ""
@@ -438,6 +441,7 @@ func buildSessionListItem(sessionID string, sess sessionFile, toolFeedbackMaxArg
 		MessageCount: len(transcript),
 		Created:      sess.Created.Format(time.RFC3339),
 		Updated:      sess.Updated.Format(time.RFC3339),
+		IsFavorited:  meta.Favorited,
 	}
 }
 
@@ -829,7 +833,9 @@ func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			seen[ref.ID] = struct{}{}
-			items = append(items, buildSessionListItem(ref.ID, sess, toolFeedbackMaxArgsLength))
+			metaPath := filepath.Join(dir, sanitizeSessionKey(ref.Key)+".meta.json")
+			meta, _ := h.readSessionMeta(metaPath, ref.Key)
+			items = append(items, buildSessionListItem(ref.ID, sess, meta, toolFeedbackMaxArgsLength))
 		}
 	}
 
@@ -843,12 +849,15 @@ func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			seen[ref.ID] = struct{}{}
-			items = append(items, buildSessionListItem(ref.ID, sess, toolFeedbackMaxArgsLength))
+			items = append(items, buildSessionListItem(ref.ID, sess, memory.SessionMeta{}, toolFeedbackMaxArgsLength))
 		}
 	}
 
-	// Sort by updated descending (most recent first)
+	// Sort by favorited descending (favorited first), then by updated descending (most recent first)
 	sort.Slice(items, func(i, j int) bool {
+		if items[i].IsFavorited != items[j].IsFavorited {
+			return items[i].IsFavorited // Favorited items come first
+		}
 		return items[i].Updated > items[j].Updated
 	})
 
@@ -986,4 +995,88 @@ func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleFavoriteSession marks a session as favorited.
+//
+//	POST /api/sessions/{id}/favorite
+func (h *Handler) handleFavoriteSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+	if sessionID == "" {
+		http.Error(w, "missing session id", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.toggleSessionFavorite(sessionID, true); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			http.Error(w, "session not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "failed to favorite session", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleUnfavoriteSession removes the favorite mark from a session.
+//
+//	DELETE /api/sessions/{id}/favorite
+func (h *Handler) handleUnfavoriteSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+	if sessionID == "" {
+		http.Error(w, "missing session id", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.toggleSessionFavorite(sessionID, false); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			http.Error(w, "session not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "failed to unfavorite session", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// toggleSessionFavorite updates the favorite status of a session.
+func (h *Handler) toggleSessionFavorite(sessionID string, favorited bool) error {
+	dir, err := h.sessionsDir()
+	if err != nil {
+		return err
+	}
+
+	// Try to find JSONL session first
+	ref, refErr := h.findPicoJSONLSession(dir, sessionID)
+	if refErr == nil {
+		base := filepath.Join(dir, sanitizeSessionKey(ref.Key))
+		metaPath := base + ".meta.json"
+
+		meta, err := h.readSessionMeta(metaPath, ref.Key)
+		if err != nil {
+			meta = memory.SessionMeta{Key: ref.Key}
+		}
+
+		meta.Favorited = favorited
+
+		data, err := json.MarshalIndent(meta, "", "  ")
+		if err != nil {
+			return err
+		}
+
+		if err := os.WriteFile(metaPath, data, 0o644); err != nil {
+			return err
+		}
+
+		return nil
+	}
+
+	// Try legacy session (read-only, can't favorite)
+	if _, err := h.findLegacyPicoSession(dir, sessionID); err == nil {
+		return errors.New("cannot favorite legacy session")
+	}
+
+	return os.ErrNotExist
 }

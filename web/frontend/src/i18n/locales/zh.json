@@ -84,6 +84,8 @@
     "historyOpenFailed": "打开该历史会话失败",
     "loadingMore": "加载更多...",
     "deleteSession": "删除会话",
+    "favoriteSession": "添加到收藏",
+    "unfavoriteSession": "从收藏中移除",
     "messagesCount": "{{count}} 条消息",
     "noModel": "选择模型",
     "inputDisabled": {

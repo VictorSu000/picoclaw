@@ -84,6 +84,8 @@
     "historyOpenFailed": "Failed to open this chat history",
     "loadingMore": "Loading more...",
     "deleteSession": "Delete session",
+    "favoriteSession": "Add to favorites",
+    "unfavoriteSession": "Remove from favorites",
     "messagesCount": "{{count}} messages",
     "noModel": "Select model",
     "inputDisabled": {
