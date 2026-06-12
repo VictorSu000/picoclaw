@@ -1,7 +1,7 @@
 # ============================================================
 # Stage 1: Build frontend assets (Node.js + pnpm)
 # ============================================================
-FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/node:24-alpine3.23 AS frontend
+FROM node:24-alpine3.23 AS frontend
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
@@ -9,7 +9,7 @@ WORKDIR /src/web/frontend
 
 # Cache frontend dependencies
 COPY web/frontend/package.json web/frontend/pnpm-lock.yaml ./
-RUN CI=true pnpm install --frozen-lockfile
+RUN pnpm config set registry https://registry.npmmirror.com && CI=true pnpm install --frozen-lockfile
 
 # Build frontend
 COPY web/frontend/ ./
@@ -18,7 +18,7 @@ RUN pnpm build:backend
 # ============================================================
 # Stage 2: Build the picoclaw binary
 # ============================================================
-FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/golang:1.26-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories &&  apk add --no-cache git make
 
@@ -51,7 +51,7 @@ RUN CONFIG_PKG=github.com/sipeed/picoclaw/pkg/config && \
 # ============================================================
 # Stage 3: Node.js runtime with Python + MCP support
 # ============================================================
-FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/node:24-bookworm
+FROM node:24-bookworm
 
 RUN sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list.d/debian.sources && apt update && apt install -y \
   ca-certificates \
