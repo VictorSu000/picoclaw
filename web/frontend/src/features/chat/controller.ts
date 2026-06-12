@@ -1,6 +1,7 @@
 import { getDefaultStore } from "jotai"
 import { toast } from "sonner"
 
+import { forkSession } from "@/api/sessions"
 import {
   loadSessionMessages,
   mergeHistoryMessages,
@@ -15,7 +16,9 @@ import { invalidateSocket, isCurrentSocket } from "@/features/chat/websocket"
 import i18n from "@/i18n"
 import {
   type ChatAttachment,
+  assistantDetailVisibilityAtom,
   getChatState,
+  shouldShowAssistantMessage,
   updateChatStore,
 } from "@/store/chat"
 import { type GatewayState, gatewayAtom } from "@/store/gateway"
@@ -424,6 +427,74 @@ export async function newChatSession() {
   if (store.get(gatewayAtom).status === "running") {
     shouldMaintainConnection = true
     await connectChat()
+  }
+}
+
+/**
+ * Fork the current chat session at the given visible-message index.
+ *
+ * The visible index is mapped to a transcript index (position in the
+ * detail-session-messages output that GET /api/sessions/{id} returns).
+ * The backend then maps the transcript index back to the raw persisted
+ * message boundary, ensuring the fork point is always correct regardless
+ * of how raw messages expand into transcript entries.
+ */
+export async function forkChatSession(visibleIndex: number) {
+  const sourceSessionId = activeSessionIdRef
+  const allMessages = getChatState().messages
+  const detailVisibility = store.get(assistantDetailVisibilityAtom)
+
+  // visibleIndex points to the message AFTER the fork point in the filtered
+  // visible list. Find the transcript index (position in allMessages) of the
+  // last message to include (the one at visibleIndex-1 in the filtered list).
+  let transcriptIndex = -1
+  let visibleCount = 0
+  for (let i = 0; i < allMessages.length; i++) {
+    const msg = allMessages[i]
+    if (
+      msg.role === "user" ||
+      shouldShowAssistantMessage(detailVisibility, msg.kind)
+    ) {
+      if (visibleCount === visibleIndex - 1) {
+        transcriptIndex = i
+        break
+      }
+      visibleCount++
+    }
+  }
+
+  if (transcriptIndex < 0) {
+    throw new Error("Invalid fork position")
+  }
+
+  const newSessionId = generateSessionId()
+
+  try {
+    await forkSession(sourceSessionId, newSessionId, transcriptIndex)
+  } catch (error) {
+    console.error("Failed to fork session:", error)
+    throw error
+  }
+
+  try {
+    const historyMessages = await loadSessionMessages(newSessionId)
+
+    disconnectChatInternal({ clearDesiredConnection: false })
+    setActiveSessionId(newSessionId)
+    updateChatStore({
+      messages: historyMessages,
+      isTyping: false,
+      hasHydratedActiveSession: true,
+      contextUsage: undefined,
+    })
+
+    if (store.get(gatewayAtom).status === "running") {
+      shouldMaintainConnection = true
+      await connectChat()
+    }
+  } catch (error) {
+    console.error("Failed to load forked session history:", error)
+    toast.error(i18n.t("chat.historyOpenFailed"))
   }
 }
 

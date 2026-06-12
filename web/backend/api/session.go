@@ -27,6 +27,7 @@ func (h *Handler) registerSessionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/sessions/{id}", h.handleDeleteSession)
 	mux.HandleFunc("POST /api/sessions/{id}/favorite", h.handleFavoriteSession)
 	mux.HandleFunc("DELETE /api/sessions/{id}/favorite", h.handleUnfavoriteSession)
+	mux.HandleFunc("POST /api/sessions/{id}/fork", h.handleForkSession)
 }
 
 // sessionFile mirrors the on-disk session JSON structure from pkg/session.
@@ -1079,4 +1080,335 @@ func (h *Handler) toggleSessionFavorite(sessionID string, favorited bool) error 
 	}
 
 	return os.ErrNotExist
+}
+
+// forkSessionRequest represents the request to fork a session at a specific
+// transcript index. The transcript index refers to the position in the
+// detail-session-messages output (which includes thoughts), matching what
+// GET /api/sessions/{id} returns. The backend maps this back to the
+// corresponding raw persisted message boundary.
+type forkSessionRequest struct {
+	NewSessionID    string `json:"new_session_id"`
+	TranscriptIndex int    `json:"transcript_index"`
+}
+
+// forkSessionResponse represents the response from forking a session.
+type forkSessionResponse struct {
+	SourceSessionID string `json:"source_session_id"`
+	NewSessionID    string `json:"new_session_id"`
+}
+
+// rawMessageIndexForTranscriptIndex maps a transcript index (position in the
+// detail-session-messages output) back to the corresponding raw persisted
+// message index. Returns -1 when the transcript index is out of range.
+//
+// The mapping mirrors sessionTranscriptMessages(..., includeThoughts=true)
+// so it stays consistent with what GET /api/sessions/{id} returns.
+func rawMessageIndexForTranscriptIndex(messages []providers.Message, transcriptIndex int, toolFeedbackMaxArgsLength int) int {
+	if transcriptIndex < 0 || len(messages) == 0 {
+		return -1
+	}
+	if toolFeedbackMaxArgsLength <= 0 {
+		toolFeedbackMaxArgsLength = defaultToolFeedbackMaxArgsLength()
+	}
+
+	transcriptPos := 0
+	for rawIdx, msg := range messages {
+		attachments := sessionAttachments(msg)
+
+		switch msg.Role {
+		case "tool":
+			// tool messages never appear in the transcript
+			continue
+
+		case "user":
+			chatMsg := sessionChatMessage{
+				Role:        "user",
+				Content:     msg.Content,
+				ModelName:   msg.ModelName,
+				Media:       append([]string(nil), msg.Media...),
+				Attachments: attachments,
+			}
+			if sessionChatMessageVisible(chatMsg) {
+				if transcriptPos == transcriptIndex {
+					return rawIdx + 1 // include this message in the fork
+				}
+				transcriptPos++
+			}
+
+		case "assistant":
+			if messageutil.IsTransientAssistantThoughtMessage(msg) {
+				continue
+			}
+
+			// Thought entry (includeThoughts=true for detail view)
+			if _, ok := assistantThoughtMessage(msg); ok {
+				if transcriptPos == transcriptIndex {
+					return rawIdx + 1
+				}
+				transcriptPos++
+			}
+
+			_, hasToolCallsMsg := assistantToolCallsMessage(
+				msg.ToolCalls,
+				msg.ModelName,
+				toolFeedbackMaxArgsLength,
+			)
+			visibleToolMessages := visibleAssistantToolMessages(msg.ToolCalls, msg.ModelName)
+
+			content := msg.Content
+			if assistantMessageInternalOnly(msg) {
+				if len(attachments) == 0 {
+					if hasToolCallsMsg {
+						if transcriptPos == transcriptIndex {
+							return rawIdx + 1
+						}
+						transcriptPos++
+					}
+					for range visibleToolMessages {
+						if transcriptPos == transcriptIndex {
+							return rawIdx + 1
+						}
+						transcriptPos++
+					}
+					continue
+				}
+				content = ""
+			}
+			if hasToolCallsMsg && utils.ToolCallExplanationDuplicatesContent(content, msg.ToolCalls) {
+				content = ""
+			}
+
+			chatMsg := sessionChatMessage{
+				Role:        "assistant",
+				Content:     content,
+				ModelName:   msg.ModelName,
+				Media:       append([]string(nil), msg.Media...),
+				Attachments: attachments,
+			}
+			if !sessionChatMessageVisible(chatMsg) {
+				if hasToolCallsMsg {
+					if transcriptPos == transcriptIndex {
+						return rawIdx + 1
+					}
+					transcriptPos++
+				}
+				for range visibleToolMessages {
+					if transcriptPos == transcriptIndex {
+						return rawIdx + 1
+					}
+					transcriptPos++
+				}
+				continue
+			}
+
+			if transcriptPos == transcriptIndex {
+				return rawIdx + 1
+			}
+			transcriptPos++
+
+			if hasToolCallsMsg {
+				if transcriptPos == transcriptIndex {
+					return rawIdx + 1
+				}
+				transcriptPos++
+			}
+			for range visibleToolMessages {
+				if transcriptPos == transcriptIndex {
+					return rawIdx + 1
+				}
+				transcriptPos++
+			}
+		}
+	}
+
+	// transcriptIndex beyond the last transcript entry → include all messages
+	if transcriptPos <= transcriptIndex {
+		return len(messages)
+	}
+	return -1
+}
+
+// handleForkSession creates a new session with messages from an existing session up to a specific transcript index.
+//
+//	POST /api/sessions/{id}/fork
+//	Request body: {"new_session_id": "uuid", "transcript_index": 3}
+func (h *Handler) handleForkSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+	if sessionID == "" {
+		http.Error(w, "missing session id", http.StatusBadRequest)
+		return
+	}
+
+	var req forkSessionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	req.NewSessionID = strings.TrimSpace(req.NewSessionID)
+	if req.NewSessionID == "" {
+		http.Error(w, "missing new_session_id", http.StatusBadRequest)
+		return
+	}
+	if req.NewSessionID == sessionID {
+		http.Error(w, "new_session_id must differ from source session id", http.StatusBadRequest)
+		return
+	}
+
+	if req.TranscriptIndex < 0 {
+		http.Error(w, "invalid transcript_index", http.StatusBadRequest)
+		return
+	}
+
+	dir, toolFeedbackMaxArgsLength, err := h.sessionRuntimeSettings()
+	if err != nil {
+		http.Error(w, "failed to resolve sessions directory", http.StatusInternalServerError)
+		return
+	}
+
+	// Build a structured scope matching what the gateway produces for pico
+	// web chat sessions (default dimensions = ["chat"], ChatType = "direct").
+	// The session key MUST be derived from the scope (not the legacy alias)
+	// so it matches the key the gateway computes when the user sends the
+	// first message in the forked session.
+	scope := session.SessionScope{
+		Version:    session.ScopeVersionV1,
+		AgentID:    "main",
+		Channel:    "pico",
+		Account:    "default",
+		Dimensions: []string{"chat"},
+		Values:     map[string]string{"chat": "direct:pico:" + req.NewSessionID},
+	}
+	newSessionKey := session.BuildSessionKey(scope)
+	legacyAlias := "agent:main:pico:direct:pico:" + req.NewSessionID
+
+	// Reject if the new session already exists (check both opaque and legacy).
+	if _, err := h.findPicoJSONLSession(dir, req.NewSessionID); err == nil {
+		http.Error(w, "new session already exists", http.StatusConflict)
+		return
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		http.Error(w, "failed to check new session", http.StatusInternalServerError)
+		return
+	}
+	if _, err := h.findLegacyPicoSession(dir, req.NewSessionID); err == nil {
+		http.Error(w, "new session already exists", http.StatusConflict)
+		return
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		http.Error(w, "failed to check new session", http.StatusInternalServerError)
+		return
+	}
+
+	// Find the source session.
+	ref, refErr := h.findPicoJSONLSession(dir, sessionID)
+	var sess sessionFile
+	err = refErr
+	if refErr == nil {
+		sess, err = h.readJSONLSession(dir, ref.Key)
+	}
+	if err == nil && isEmptySession(sess) {
+		err = os.ErrNotExist
+	}
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// Try legacy session
+			if legacyRef, legacyErr := h.findLegacyPicoSession(dir, sessionID); legacyErr == nil {
+				sess, err = h.readLegacySession(legacyRef.Path)
+			}
+			if err == nil && isEmptySession(sess) {
+				err = os.ErrNotExist
+			}
+		}
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				http.Error(w, "source session not found", http.StatusNotFound)
+			} else {
+				http.Error(w, "failed to read source session", http.StatusInternalServerError)
+			}
+			return
+		}
+	}
+
+	// Map the transcript index back to the raw persisted message boundary.
+	// The transcript index refers to the position in the detail-session-messages
+	// output (which includes thoughts), matching what GET /api/sessions/{id}
+	// returns to the frontend.
+	rawCount := rawMessageIndexForTranscriptIndex(sess.Messages, req.TranscriptIndex, toolFeedbackMaxArgsLength)
+	if rawCount <= 0 {
+		http.Error(w, "transcript_index out of range", http.StatusBadRequest)
+		return
+	}
+
+	// Validate that the fork point is at a user message or an assistant
+	// "normal" reply. Forking at thought/tool-call boundaries is not allowed
+	// because those are internal details, not meaningful conversation boundaries.
+	transcript := detailSessionMessages(sess.Messages[:rawCount], toolFeedbackMaxArgsLength)
+	if len(transcript) == 0 {
+		http.Error(w, "no messages at transcript_index", http.StatusBadRequest)
+		return
+	}
+	lastMsg := transcript[len(transcript)-1]
+	if lastMsg.Role == "assistant" && lastMsg.Kind != "" && lastMsg.Kind != "normal" {
+		http.Error(w, "cannot fork at a thought or tool-call message", http.StatusBadRequest)
+		return
+	}
+
+	forkedMessages := sess.Messages[:rawCount]
+
+	// Write the new session files using the opaque key.
+	base := filepath.Join(dir, sanitizeSessionKey(newSessionKey))
+	jsonlPath := base + ".jsonl"
+	metaPath := base + ".meta.json"
+
+	// Write JSONL file with forked messages.
+	jsonlFile, err := os.Create(jsonlPath)
+	if err != nil {
+		http.Error(w, "failed to create new session file", http.StatusInternalServerError)
+		return
+	}
+	defer jsonlFile.Close()
+
+	encoder := json.NewEncoder(jsonlFile)
+	for _, msg := range forkedMessages {
+		if err := encoder.Encode(msg); err != nil {
+			http.Error(w, "failed to write messages to new session", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Write metadata file with legacy alias for compatibility.
+	now := time.Now()
+
+	scopeData, err := json.Marshal(scope)
+	if err != nil {
+		http.Error(w, "failed to marshal session scope", http.StatusInternalServerError)
+		return
+	}
+
+	meta := memory.SessionMeta{
+		Key:       newSessionKey,
+		Count:     len(forkedMessages),
+		CreatedAt: now,
+		UpdatedAt: now,
+		Scope:     scopeData,
+		Aliases:   []string{legacyAlias},
+	}
+
+	metaData, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		http.Error(w, "failed to marshal session metadata", http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.WriteFile(metaPath, metaData, 0o644); err != nil {
+		http.Error(w, "failed to write session metadata", http.StatusInternalServerError)
+		return
+	}
+
+	// Return success response.
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(forkSessionResponse{
+		SourceSessionID: sessionID,
+		NewSessionID:    req.NewSessionID,
+	})
 }

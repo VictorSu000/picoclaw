@@ -91,3 +91,34 @@ export async function unfavoriteSession(id: string): Promise<void> {
     throw new Error(`Failed to unfavorite session ${id}: ${res.status}`)
   }
 }
+
+export interface ForkSessionRequest {
+  new_session_id: string
+  transcript_index: number
+}
+
+export interface ForkSessionResponse {
+  source_session_id: string
+  new_session_id: string
+}
+
+export async function forkSession(
+  id: string,
+  newSessionId: string,
+  transcriptIndex: number,
+): Promise<ForkSessionResponse> {
+  const res = await launcherFetch(`/api/sessions/${encodeURIComponent(id)}/fork`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      new_session_id: newSessionId,
+      transcript_index: transcriptIndex,
+    }),
+  })
+  if (!res.ok) {
+    throw new Error(`Failed to fork session ${id}: ${res.status}`)
+  }
+  return res.json()
+}

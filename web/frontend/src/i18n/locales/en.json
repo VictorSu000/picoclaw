@@ -52,6 +52,10 @@
       "noDefaultModel": "Unable to chat: No default model is selected. Set a default model on the Models page."
     },
     "newChat": "New Chat",
+    "fork": "Fork",
+    "forking": "Forking…",
+    "forkFromHere": "Fork conversation from this point",
+    "forkSessionFailed": "Failed to fork session",
     "notConnected": "Gateway is not running. Start it to chat.",
     "thinking": {
       "step1": "Thinking...",

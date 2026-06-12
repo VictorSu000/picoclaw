@@ -52,6 +52,10 @@
       "noDefaultModel": "Não é possível conversar: nenhum modelo padrão está selecionado. Defina um modelo padrão na página de Modelos."
     },
     "newChat": "Novo Chat",
+    "fork": "Bifurcar",
+    "forking": "Bifurcando…",
+    "forkFromHere": "Bifurcar conversa a partir deste ponto",
+    "forkSessionFailed": "Falha ao bifurcar sessão",
     "notConnected": "O Gateway não está rodando. Inicie-o para conversar.",
     "thinking": {
       "step1": "Pensando...",

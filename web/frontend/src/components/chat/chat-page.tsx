@@ -1,4 +1,4 @@
-import { IconPlus } from "@tabler/icons-react"
+import { IconGitFork, IconPlus } from "@tabler/icons-react"
 import { useAtom } from "jotai"
 import { type ChangeEvent, useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
@@ -16,6 +16,11 @@ import { TypingIndicator } from "@/components/chat/typing-indicator"
 import { UserMessage } from "@/components/chat/user-message"
 import { PageHeader } from "@/components/page-header"
 import { Button } from "@/components/ui/button"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import {
   Select,
   SelectContent,
@@ -148,6 +153,7 @@ export function ChatPage() {
     sendMessage,
     switchSession,
     newChat,
+    forkChat,
   } = usePicoChat()
 
   const { state: gwState } = useGateway()
@@ -276,6 +282,21 @@ export function ChatPage() {
   const canSubmit =
     canInput && (Boolean(input.trim()) || attachments.length > 0)
 
+  const [forkingMessageIndex, setForkingMessageIndex] = useState<
+    number | null
+  >(null)
+
+  const handleForkChat = async (visibleIndex: number) => {
+    setForkingMessageIndex(visibleIndex)
+    try {
+      await forkChat(visibleIndex)
+    } catch {
+      toast.error(t("chat.forkSessionFailed"))
+    } finally {
+      setForkingMessageIndex(null)
+    }
+  }
+
   return (
     <div className="bg-background/95 flex h-full flex-col">
       <PageHeader
@@ -354,7 +375,7 @@ export function ChatPage() {
         onScroll={handleScroll}
         className="min-h-0 flex-1 [scrollbar-gutter:stable] overflow-y-auto px-4 py-6 md:px-8 lg:px-24 xl:px-48"
       >
-        <div className="mx-auto flex w-full max-w-250 flex-col gap-8 pb-8">
+        <div className="mx-auto flex w-full max-w-250 flex-col gap-4 pb-4">
           {messages.length === 0 && !isTyping && (
             <ChatEmptyState
               hasAvailableModels={hasAvailableModels}
@@ -363,33 +384,70 @@ export function ChatPage() {
             />
           )}
 
-          {messages.map((msg) => {
-            if (
-              !shouldShowAssistantMessage(assistantDetailVisibility, msg.kind)
-            ) {
-              return null
-            }
-
-            return (
-              <div key={msg.id} className="flex w-full">
-                {msg.role === "assistant" ? (
-                  <AssistantMessage
-                    content={msg.content}
-                    attachments={msg.attachments}
-                    kind={msg.kind}
-                    modelName={msg.modelName}
-                    toolCalls={msg.toolCalls}
-                    timestamp={msg.timestamp}
-                  />
-                ) : (
-                  <UserMessage
-                    content={msg.content}
-                    attachments={msg.attachments}
-                  />
-                )}
-              </div>
+          {(() => {
+            const visibleMessages = messages.filter((msg) =>
+              shouldShowAssistantMessage(assistantDetailVisibility, msg.kind),
             )
-          })}
+
+            return visibleMessages.map((msg, visibleIndex) => {
+              const isForking = forkingMessageIndex === visibleIndex
+
+              return (
+                <div key={msg.id}>
+                  {/* Fork button between messages – only after user or assistant "normal" messages. */}
+                  {visibleIndex > 0 && (() => {
+                    const prevMsg = visibleMessages[visibleIndex - 1]
+                    const canFork =
+                      prevMsg.role === "user" ||
+                      (prevMsg.role === "assistant" &&
+                        (!prevMsg.kind || prevMsg.kind === "normal"))
+                    if (!canFork) return null
+                    return (
+                      <div className="flex justify-center py-0">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-muted-foreground/60 hover:text-foreground h-7 gap-1.5"
+                              disabled={isForking || forkingMessageIndex !== null}
+                              onClick={() => handleForkChat(visibleIndex)}
+                            >
+                              <IconGitFork className="size-3.5" />
+                              <span className="text-xs">
+                                {isForking ? t("chat.forking") : t("chat.fork")}
+                              </span>
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {t("chat.forkFromHere")}
+                          </TooltipContent>
+                        </Tooltip>
+                      </div>
+                    )
+                  })()}
+
+                  <div className="flex w-full">
+                    {msg.role === "assistant" ? (
+                      <AssistantMessage
+                        content={msg.content}
+                        attachments={msg.attachments}
+                        kind={msg.kind}
+                        modelName={msg.modelName}
+                        toolCalls={msg.toolCalls}
+                        timestamp={msg.timestamp}
+                      />
+                    ) : (
+                      <UserMessage
+                        content={msg.content}
+                        attachments={msg.attachments}
+                      />
+                    )}
+                  </div>
+                </div>
+              )
+            })
+          })()}
 
           {isTyping && <TypingIndicator />}
         </div>
