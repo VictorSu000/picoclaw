@@ -1,6 +1,7 @@
 import { IconHistory, IconTrash, IconStar } from "@tabler/icons-react"
 import dayjs from "dayjs"
 import type { RefObject } from "react"
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import type { SessionSummary } from "@/api/sessions"
@@ -11,6 +12,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
 interface SessionHistoryMenuProps {
@@ -39,6 +41,7 @@ export function SessionHistoryMenu({
   onToggleFavorite,
 }: SessionHistoryMenuProps) {
   const { t } = useTranslation()
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
 
   return (
     <DropdownMenu onOpenChange={onOpenChange}>
@@ -96,19 +99,63 @@ export function SessionHistoryMenu({
                 >
                   <IconStar className="h-4 w-4" fill={session.is_favorited ? "currentColor" : "none"} />
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label={t("chat.deleteSession")}
-                  className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive absolute top-1/2 right-2 h-6 w-6 -translate-y-1/2 opacity-0 transition-opacity group-hover:opacity-100"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    onDeleteSession(session.id)
+                <Popover
+                  open={confirmingDeleteId === session.id}
+                  modal={true}
+                  onOpenChange={(open) => {
+                    if (!open) setConfirmingDeleteId(null)
                   }}
                 >
-                  <IconTrash className="h-4 w-4" />
-                </Button>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={t("chat.deleteSession")}
+                      className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive absolute top-1/2 right-2 h-6 w-6 -translate-y-1/2 opacity-0 transition-opacity group-hover:opacity-100"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        setConfirmingDeleteId(session.id)
+                      }}
+                    >
+                      <IconTrash className="h-4 w-4" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    align="end"
+                    side="left"
+                    sideOffset={8}
+                    className="w-56 p-3"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <p className="text-sm leading-relaxed mb-3">
+                      {t("chat.deleteSessionConfirm")}
+                    </p>
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setConfirmingDeleteId(null)
+                        }}
+                      >
+                        {t("chat.deleteSessionCancel")}
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onDeleteSession(session.id)
+                          setConfirmingDeleteId(null)
+                        }}
+                      >
+                        {t("chat.deleteSessionConfirmButton")}
+                      </Button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </DropdownMenuItem>
             ))
           )}
