@@ -1,7 +1,7 @@
-import { IconHistory, IconTrash, IconStar } from "@tabler/icons-react"
+import { IconHistory, IconTrash, IconStar, IconPencil } from "@tabler/icons-react"
 import dayjs from "dayjs"
 import type { RefObject } from "react"
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import type { SessionSummary } from "@/api/sessions"
@@ -12,6 +12,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
@@ -26,6 +27,7 @@ interface SessionHistoryMenuProps {
   onSwitchSession: (sessionId: string) => void
   onDeleteSession: (sessionId: string) => void
   onToggleFavorite: (sessionId: string, currentlyFavorited: boolean) => void
+  onRenameSession: (sessionId: string, title: string) => void
 }
 
 export function SessionHistoryMenu({
@@ -39,9 +41,13 @@ export function SessionHistoryMenu({
   onSwitchSession,
   onDeleteSession,
   onToggleFavorite,
+  onRenameSession,
 }: SessionHistoryMenuProps) {
   const { t } = useTranslation()
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
+  const [editingTitle, setEditingTitle] = useState("")
+  const renameInputRef = useRef<HTMLInputElement>(null)
 
   return (
     <DropdownMenu onOpenChange={onOpenChange}>
@@ -72,17 +78,65 @@ export function SessionHistoryMenu({
                 key={session.id}
                 className={`group relative my-0.5 flex flex-col items-start gap-0.5 pr-14 ${session.id === activeSessionId ? "bg-accent" : ""
                   }`}
-                onClick={() => onSwitchSession(session.id)}
+                onClick={() => {
+                  if (editingSessionId !== session.id) {
+                    onSwitchSession(session.id)
+                  }
+                }}
               >
-                <span className="line-clamp-1 text-sm font-medium">
-                  {session.title}
-                </span>
+                {editingSessionId === session.id ? (
+                  <div
+                    className="flex w-full items-center gap-1"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Input
+                      ref={renameInputRef}
+                      value={editingTitle}
+                      placeholder="Enter确认，Esc取消"
+                      onChange={(e) => setEditingTitle(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault()
+                          const trimmed = editingTitle.trim()
+                          if (trimmed) {
+                            onRenameSession(session.id, trimmed)
+                          }
+                          setEditingSessionId(null)
+                        } else if (e.key === "Escape") {
+                          e.preventDefault()
+                          setEditingSessionId(null)
+                        }
+                      }}
+                      className="h-7 text-sm"
+                      autoFocus
+                    />
+                  </div>
+                ) : (
+                  <span className="line-clamp-1 text-sm font-medium">
+                    {session.title}
+                  </span>
+                )}
                 <span className="text-muted-foreground text-xs">
                   {t("chat.messagesCount", {
                     count: session.message_count,
                   })}{" "}
                   · {dayjs(session.updated).fromNow()}
                 </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={t("chat.renameSession")}
+                  className="text-muted-foreground hover:text-muted-foreground absolute top-1/2 right-16 h-6 w-6 -translate-y-1/2 opacity-0 transition-opacity group-hover:opacity-100"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    setEditingSessionId(session.id)
+                    setEditingTitle(session.title)
+                    setTimeout(() => renameInputRef.current?.focus(), 0)
+                  }}
+                >
+                  <IconPencil className="h-3.5 w-3.5" />
+                </Button>
                 <Button
                   variant="ghost"
                   size="icon"

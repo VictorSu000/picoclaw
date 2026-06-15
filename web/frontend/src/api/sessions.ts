@@ -92,6 +92,23 @@ export async function unfavoriteSession(id: string): Promise<void> {
   }
 }
 
+export async function renameSession(
+  id: string,
+  title: string,
+): Promise<{ id: string; title: string }> {
+  const res = await launcherFetch(`/api/sessions/${encodeURIComponent(id)}/rename`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ title }),
+  })
+  if (!res.ok) {
+    throw new Error(`Failed to rename session ${id}: ${res.status}`)
+  }
+  return res.json()
+}
+
 export interface ForkSessionRequest {
   new_session_id: string
   transcript_index: number

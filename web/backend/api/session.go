@@ -28,6 +28,7 @@ func (h *Handler) registerSessionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/sessions/{id}/favorite", h.handleFavoriteSession)
 	mux.HandleFunc("DELETE /api/sessions/{id}/favorite", h.handleUnfavoriteSession)
 	mux.HandleFunc("POST /api/sessions/{id}/fork", h.handleForkSession)
+	mux.HandleFunc("POST /api/sessions/{id}/rename", h.handleRenameSession)
 }
 
 // sessionFile mirrors the on-disk session JSON structure from pkg/session.
@@ -433,7 +434,11 @@ func buildSessionListItem(sessionID string, sess sessionFile, meta memory.Sessio
 	if preview == "" {
 		preview = "(empty)"
 	}
+
 	title := preview
+	if strings.TrimSpace(meta.Title) != "" {
+		title = meta.Title
+	}
 
 	return sessionListItem{
 		ID:           sessionID,
@@ -1040,6 +1045,74 @@ func (h *Handler) handleUnfavoriteSession(w http.ResponseWriter, r *http.Request
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// renameSessionRequest represents the request to rename a session.
+type renameSessionRequest struct {
+	Title string `json:"title"`
+}
+
+// handleRenameSession renames a session by setting a custom title.
+//
+//	POST /api/sessions/{id}/rename
+//	Request body: {"title": "new title"}
+func (h *Handler) handleRenameSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+	if sessionID == "" {
+		http.Error(w, "missing session id", http.StatusBadRequest)
+		return
+	}
+
+	var req renameSessionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	req.Title = strings.TrimSpace(req.Title)
+
+	dir, err := h.sessionsDir()
+	if err != nil {
+		http.Error(w, "failed to resolve sessions directory", http.StatusInternalServerError)
+		return
+	}
+
+	ref, refErr := h.findPicoJSONLSession(dir, sessionID)
+	if refErr != nil {
+		if errors.Is(refErr, os.ErrNotExist) {
+			http.Error(w, "session not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "failed to find session", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	base := filepath.Join(dir, sanitizeSessionKey(ref.Key))
+	metaPath := base + ".meta.json"
+
+	meta, err := h.readSessionMeta(metaPath, ref.Key)
+	if err != nil {
+		meta = memory.SessionMeta{Key: ref.Key}
+	}
+
+	meta.Title = req.Title
+
+	data, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		http.Error(w, "failed to encode session meta", http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.WriteFile(metaPath, data, 0o644); err != nil {
+		http.Error(w, "failed to write session meta", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"id":    sessionID,
+		"title": req.Title,
+	})
 }
 
 // toggleSessionFavorite updates the favorite status of a session.

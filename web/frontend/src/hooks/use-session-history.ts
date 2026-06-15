@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
-import { type SessionSummary, deleteSession, getSessions, favoriteSession, unfavoriteSession } from "@/api/sessions"
+import { type SessionSummary, deleteSession, getSessions, favoriteSession, unfavoriteSession, renameSession } from "@/api/sessions"
 
 const LIMIT = 20
 
@@ -129,6 +129,22 @@ export function useSessionHistory({
     [loadSessions],
   )
 
+  const handleRenameSession = useCallback(
+    async (id: string, title: string) => {
+      try {
+        await renameSession(id, title)
+        setSessions((prev) =>
+          prev.map((s) =>
+            s.id === id ? { ...s, title } : s,
+          ),
+        )
+      } catch (err) {
+        console.error("Failed to rename session:", err)
+      }
+    },
+    [],
+  )
+
   return {
     sessions,
     hasMore,
@@ -138,5 +154,6 @@ export function useSessionHistory({
     loadSessions,
     handleDeleteSession,
     handleToggleFavorite,
+    handleRenameSession,
   }
 }

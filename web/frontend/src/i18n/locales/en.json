@@ -93,6 +93,8 @@
     "deleteSessionConfirmButton": "Confirm Delete",
     "favoriteSession": "Add to favorites",
     "unfavoriteSession": "Remove from favorites",
+    "renameSession": "Rename session",
+    "renameSessionPlaceholder": "Enter new name...",
     "messagesCount": "{{count}} messages",
     "noModel": "Select model",
     "inputDisabled": {

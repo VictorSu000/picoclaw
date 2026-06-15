@@ -184,6 +184,7 @@ export function ChatPage() {
     loadSessions,
     handleDeleteSession,
     handleToggleFavorite,
+    handleRenameSession,
   } = useSessionHistory({
     activeSessionId,
     onDeletedActiveSession: newChat,
@@ -367,6 +368,7 @@ export function ChatPage() {
           onSwitchSession={switchSession}
           onDeleteSession={handleDeleteSession}
           onToggleFavorite={handleToggleFavorite}
+          onRenameSession={handleRenameSession}
         />
       </PageHeader>
 

@@ -93,6 +93,8 @@
     "deleteSessionConfirmButton": "确认删除",
     "favoriteSession": "添加到收藏",
     "unfavoriteSession": "从收藏中移除",
+    "renameSession": "重命名会话",
+    "renameSessionPlaceholder": "输入新名称...",
     "messagesCount": "{{count}} 条消息",
     "noModel": "选择模型",
     "inputDisabled": {

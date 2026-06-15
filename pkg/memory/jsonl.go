@@ -40,6 +40,7 @@ const (
 // higher-level session package while still preserving structured scope data.
 type SessionMeta struct {
 	Key       string          `json:"key"`
+	Title     string          `json:"title,omitempty"`
 	Summary   string          `json:"summary"`
 	Skip      int             `json:"skip"`
 	Count     int             `json:"count"`
