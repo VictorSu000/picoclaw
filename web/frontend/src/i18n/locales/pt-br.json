@@ -100,7 +100,7 @@
       "noModel": "Nenhum modelo padrão configurado. Vá para a página de Modelos para definir um."
     },
     "sendMessage": "Enviar mensagem",
-    "sendHint": "Pressione Enter para enviar\nShift + Enter para nova linha",
+    "sendHint": "Pressione Ctrl + Enter para enviar\nEnter para nova linha",
     "contextTitle": "Contexto",
     "contextDetail": "Ver Detalhes",
     "attachImage": "Adicionar imagens",
