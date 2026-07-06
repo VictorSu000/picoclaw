@@ -13,6 +13,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -167,6 +168,13 @@ func outboundMessageIsToolFeedback(msg bus.OutboundMessage) bool {
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(msg.Context.Raw["message_kind"]), "tool_feedback")
+}
+
+func outboundMessageIsToolCalls(msg bus.OutboundMessage) bool {
+	if len(msg.Context.Raw) == 0 {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(msg.Context.Raw["message_kind"]), "tool_calls")
 }
 
 func outboundMessageHasAuxiliaryKind(msg bus.OutboundMessage) bool {
@@ -379,6 +387,7 @@ func (m *Manager) preSend(ctx context.Context, name string, msg bus.OutboundMess
 	}
 
 	isToolFeedback := outboundMessageIsToolFeedback(msg)
+	isToolCalls := outboundMessageIsToolCalls(msg)
 	isAuxiliaryMessage := outboundMessageHasAuxiliaryKind(msg)
 	isFinalMessage := outboundMessageIsFinal(msg)
 	separateToolFeedbackMessages := m.toolFeedbackSeparateMessagesEnabled()
@@ -388,7 +397,9 @@ func (m *Manager) preSend(ctx context.Context, name string, msg bus.OutboundMess
 	// finalization bypasses the worker queue, so older queued feedback/thoughts
 	// can arrive before the normal final outbound message that cleans up the
 	// marker and placeholder.
-	if isAuxiliaryMessage {
+	// Note: tool_calls messages must NOT be dropped as they represent new tool
+	// invocations for the current turn that must be delivered to the UI.
+	if isAuxiliaryMessage && !isToolCalls {
 		if _, loaded := m.streamActive.Load(streamKey); loaded {
 			return nil, true
 		}
@@ -1269,6 +1280,16 @@ func (m *Manager) StartAll(ctx context.Context) error {
 			for _, listener := range m.httpListeners {
 				ln := listener
 				go func() {
+					defer func() {
+						if r := recover(); r != nil {
+							logger.ErrorCF("channels", "HTTP server goroutine panic recovered",
+								map[string]any{
+									"addr":  ln.Addr().String(),
+									"panic": fmt.Sprintf("%v", r),
+									"stack": string(debug.Stack()),
+								})
+						}
+					}()
 					logger.InfoCF("channels", "Shared HTTP server listening", map[string]any{
 						"addr": ln.Addr().String(),
 					})
@@ -1282,6 +1303,16 @@ func (m *Manager) StartAll(ctx context.Context) error {
 			}
 		} else {
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						logger.ErrorCF("channels", "HTTP server goroutine panic recovered",
+							map[string]any{
+								"addr":  m.httpServer.Addr,
+								"panic": fmt.Sprintf("%v", r),
+								"stack": string(debug.Stack()),
+							})
+					}
+				}()
 				logger.InfoCF("channels", "Shared HTTP server listening", map[string]any{
 					"addr": m.httpServer.Addr,
 				})
@@ -1933,6 +1964,15 @@ func (m *Manager) Reload(ctx context.Context, cfg *config.Config) error {
 	// Commit hashes only on full success.
 	m.channelHashes = list
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.ErrorCF("channels", "channel registration goroutine panic recovered",
+					map[string]any{
+						"panic": fmt.Sprintf("%v", r),
+						"stack": string(debug.Stack()),
+					})
+			}
+		}()
 		for _, f := range deferFuncs {
 			f()
 		}
