@@ -1243,8 +1243,9 @@ func rawMessageIndexForTranscriptIndex(messages []providers.Message, transcriptI
 				msg.ToolCalls,
 				msg.ModelName,
 				toolFeedbackMaxArgsLength,
+				msg.CreatedAt,
 			)
-			visibleToolMessages := visibleAssistantToolMessages(msg.ToolCalls, msg.ModelName)
+			visibleToolMessages := visibleAssistantToolMessages(msg.ToolCalls, msg.ModelName, msg.CreatedAt)
 
 			content := msg.Content
 			if assistantMessageInternalOnly(msg) {

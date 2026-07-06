@@ -52,6 +52,7 @@ import {
   shouldShowAssistantMessage,
 } from "@/store/chat"
 import type { GatewayState } from "@/store/gateway"
+import { toast } from "sonner"
 
 function resolveChatInputDisabledReason({
   hasDefaultModel,
@@ -482,66 +483,6 @@ export function ChatPage() {
                   </div>
                 </div>
               )
-            })
-          })()}
-
-            return visibleMessages.map((msg, visibleIndex) => {
-              const isForking = forkingMessageIndex === visibleIndex
-
-          return (
-          <div key={msg.id}>
-            {/* Fork button between messages – only after user or assistant "normal" messages. */}
-            {visibleIndex > 0 && (() => {
-              const prevMsg = visibleMessages[visibleIndex - 1]
-              const canFork =
-                prevMsg.role === "user" ||
-                (prevMsg.role === "assistant" &&
-                  (!prevMsg.kind || prevMsg.kind === "normal"))
-              if (!canFork) return null
-              return (
-                <div className="flex justify-center py-0">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-muted-foreground/60 hover:text-foreground h-7 gap-1.5"
-                        disabled={isForking || forkingMessageIndex !== null}
-                        onClick={() => handleForkChat(visibleIndex)}
-                      >
-                        <IconGitFork className="size-3.5" />
-                        <span className="text-xs">
-                          {isForking ? t("chat.forking") : t("chat.fork")}
-                        </span>
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {t("chat.forkFromHere")}
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-              )
-            })()}
-
-            <div className="flex w-full">
-              {msg.role === "assistant" ? (
-                <AssistantMessage
-                  content={msg.content}
-                  attachments={msg.attachments}
-                  kind={msg.kind}
-                  modelName={msg.modelName}
-                  toolCalls={msg.toolCalls}
-                  timestamp={msg.timestamp}
-                />
-              ) : (
-                <UserMessage
-                  content={msg.content}
-                  attachments={msg.attachments}
-                />
-              )}
-            </div>
-          </div>
-          )
             })
           })()}
 
