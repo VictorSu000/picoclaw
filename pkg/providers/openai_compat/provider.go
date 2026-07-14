@@ -626,9 +626,11 @@ func parseStreamResponse(
 
 	// Tool call assembly: OpenAI streams tool calls as incremental deltas
 	type toolAccum struct {
-		id       string
-		name     string
-		argsJSON strings.Builder
+		id                       string
+		name                     string
+		argsJSON                 strings.Builder
+		functionThoughtSignature string
+		googleThoughtSignature   string
 	}
 	activeTools := map[int]*toolAccum{}
 
@@ -651,9 +653,15 @@ func parseStreamResponse(
 						Index    int    `json:"index"`
 						ID       string `json:"id"`
 						Function *struct {
-							Name      string `json:"name"`
-							Arguments string `json:"arguments"`
+							Name             string `json:"name"`
+							Arguments        string `json:"arguments"`
+							ThoughtSignature string `json:"thought_signature"`
 						} `json:"function"`
+						ExtraContent *struct {
+							Google *struct {
+								ThoughtSignature string `json:"thought_signature"`
+							} `json:"google"`
+						} `json:"extra_content"`
 					} `json:"tool_calls"`
 				} `json:"delta"`
 				FinishReason *string `json:"finish_reason"`
@@ -716,6 +724,13 @@ func parseStreamResponse(
 				if tc.Function.Arguments != "" {
 					acc.argsJSON.WriteString(tc.Function.Arguments)
 				}
+				if tc.Function.ThoughtSignature != "" {
+					acc.functionThoughtSignature = tc.Function.ThoughtSignature
+				}
+			}
+			if tc.ExtraContent != nil && tc.ExtraContent.Google != nil &&
+				tc.ExtraContent.Google.ThoughtSignature != "" {
+				acc.googleThoughtSignature = tc.ExtraContent.Google.ThoughtSignature
 			}
 		}
 
@@ -790,11 +805,22 @@ func parseStreamResponse(
 				args["raw"] = raw
 			}
 		}
-		toolCalls = append(toolCalls, ToolCall{
-			ID:        acc.id,
-			Name:      acc.name,
-			Arguments: args,
-		})
+		thoughtSignature := acc.functionThoughtSignature
+		if thoughtSignature == "" {
+			thoughtSignature = acc.googleThoughtSignature
+		}
+		toolCall := ToolCall{
+			ID:               acc.id,
+			Name:             acc.name,
+			Arguments:        args,
+			ThoughtSignature: thoughtSignature,
+		}
+		if acc.googleThoughtSignature != "" {
+			toolCall.ExtraContent = &ExtraContent{
+				Google: &GoogleExtra{ThoughtSignature: acc.googleThoughtSignature},
+			}
+		}
+		toolCalls = append(toolCalls, toolCall)
 	}
 
 	if finishReason == "" {

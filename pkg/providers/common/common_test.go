@@ -162,7 +162,7 @@ func TestSerializeMessages_StripsSystemParts(t *testing.T) {
 	}
 }
 
-func TestSerializeMessages_StripsInternalToolCallExtraContent(t *testing.T) {
+func TestSerializeMessages_PreservesGoogleExtraAndStripsInternalToolFeedback(t *testing.T) {
 	messages := []Message{
 		{
 			Role: "assistant",
@@ -191,11 +191,17 @@ func TestSerializeMessages_StripsInternalToolCallExtraContent(t *testing.T) {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
 	payload := string(data)
-	if strings.Contains(payload, "extra_content") {
-		t.Fatalf("serialized payload should not include internal extra_content: %s", payload)
+	if !strings.Contains(
+		payload,
+		`"extra_content":{"google":{"thought_signature":"sig-ignored-here"}}`,
+	) {
+		t.Fatalf("serialized payload should preserve Google extra_content: %s", payload)
 	}
-	if !strings.Contains(payload, "thought_signature") {
-		t.Fatalf("serialized payload should preserve function thought_signature: %s", payload)
+	if strings.Contains(payload, "tool_feedback_explanation") || strings.Contains(payload, "Read README.md first.") {
+		t.Fatalf("serialized payload should strip internal tool feedback metadata: %s", payload)
+	}
+	if strings.Contains(payload, `"thought_signature":"sig-1"`) {
+		t.Fatalf("serialized payload should not relocate Google signature into function: %s", payload)
 	}
 }
 
@@ -225,6 +231,9 @@ func TestSerializeMessages_PreservesTopLevelThoughtSignature(t *testing.T) {
 	if !strings.Contains(payload, `"thought_signature":"sig-1"`) {
 		t.Fatalf("serialized payload should preserve top-level thought signature: %s", payload)
 	}
+	if strings.Contains(payload, "extra_content") {
+		t.Fatalf("function-style thought signature should not be reclassified as Google metadata: %s", payload)
+	}
 }
 
 func TestSerializeMessages_PreservesGoogleExtraThoughtSignature(t *testing.T) {
@@ -252,11 +261,35 @@ func TestSerializeMessages_PreservesGoogleExtraThoughtSignature(t *testing.T) {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
 	payload := string(data)
-	if strings.Contains(payload, "extra_content") {
-		t.Fatalf("serialized payload should not include extra_content: %s", payload)
+	if !strings.Contains(payload, `"extra_content":{"google":{"thought_signature":"sig-1"}}`) {
+		t.Fatalf("serialized payload should preserve Google extra_content: %s", payload)
 	}
-	if !strings.Contains(payload, `"thought_signature":"sig-1"`) {
-		t.Fatalf("serialized payload should preserve google thought signature: %s", payload)
+	if strings.Contains(payload, `"function":{"name":"read_file","arguments":"{\"path\":\"README.md\"}","thought_signature"`) {
+		t.Fatalf("serialized payload should keep Google signature out of function: %s", payload)
+	}
+}
+
+func TestParseAndSerializeMessages_RoundTripsGoogleThoughtSignatureLocation(t *testing.T) {
+	body := `{"choices":[{"message":{"content":"","tool_calls":[{"id":"call_1","type":"function","function":{"name":"test_tool","arguments":"{}"},"extra_content":{"google":{"thought_signature":"sig123"}}}]},"finish_reason":"tool_calls"}]}`
+	response, err := ParseResponse(strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("ParseResponse() error = %v", err)
+	}
+
+	result := SerializeMessages([]Message{{
+		Role:      "assistant",
+		ToolCalls: response.ToolCalls,
+	}})
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	payload := string(data)
+	if !strings.Contains(payload, `"extra_content":{"google":{"thought_signature":"sig123"}}`) {
+		t.Fatalf("round-trip payload lost Google thought signature location: %s", payload)
+	}
+	if strings.Contains(payload, `"function":{"name":"test_tool","arguments":"{}","thought_signature"`) {
+		t.Fatalf("round-trip payload relocated Google signature into function: %s", payload)
 	}
 }
 
@@ -789,14 +822,7 @@ func TestParseResponse_WithFunctionThoughtSignature(t *testing.T) {
 	if out.ToolCalls[0].ThoughtSignature != "sig456" {
 		t.Fatalf("ThoughtSignature = %q, want %q", out.ToolCalls[0].ThoughtSignature, "sig456")
 	}
-	if out.ToolCalls[0].ExtraContent == nil || out.ToolCalls[0].ExtraContent.Google == nil {
-		t.Fatal("ExtraContent.Google is nil")
-	}
-	if out.ToolCalls[0].ExtraContent.Google.ThoughtSignature != "sig456" {
-		t.Fatalf(
-			"ExtraContent.Google.ThoughtSignature = %q, want %q",
-			out.ToolCalls[0].ExtraContent.Google.ThoughtSignature,
-			"sig456",
-		)
+	if out.ToolCalls[0].ExtraContent != nil && out.ToolCalls[0].ExtraContent.Google != nil {
+		t.Fatalf("function thought signature should not be reclassified as Google extra content: %+v", out.ToolCalls[0])
 	}
 }

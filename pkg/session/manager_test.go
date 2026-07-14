@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/sipeed/picoclaw/pkg/providers"
 )
 
 func TestSanitizeFilename(t *testing.T) {
@@ -58,6 +60,41 @@ func TestSave_WithColonInKey(t *testing.T) {
 	}
 	if history[0].Content != "hello" {
 		t.Errorf("expected message content %q, got %q", "hello", history[0].Content)
+	}
+}
+
+func TestSave_PreservesGoogleThoughtSignature(t *testing.T) {
+	tmpDir := t.TempDir()
+	const key = "pico:thought-signature"
+	sm := NewSessionManager(tmpDir)
+	sm.AddFullMessage(key, providers.Message{
+		Role: "assistant",
+		ToolCalls: []providers.ToolCall{{
+			ID:               "call_1",
+			Type:             "function",
+			ThoughtSignature: "sig-persisted",
+			Function: &providers.FunctionCall{
+				Name:             "write_file",
+				Arguments:        `{"path":"aaa.txt"}`,
+				ThoughtSignature: "sig-persisted",
+			},
+			ExtraContent: &providers.ExtraContent{
+				Google: &providers.GoogleExtra{ThoughtSignature: "sig-persisted"},
+			},
+		}},
+	})
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("Save(%q) failed: %v", key, err)
+	}
+
+	history := NewSessionManager(tmpDir).GetHistory(key)
+	if len(history) != 1 || len(history[0].ToolCalls) != 1 {
+		t.Fatalf("history = %#v, want one persisted tool call", history)
+	}
+	toolCall := history[0].ToolCalls[0]
+	if toolCall.ExtraContent == nil || toolCall.ExtraContent.Google == nil ||
+		toolCall.ExtraContent.Google.ThoughtSignature != "sig-persisted" {
+		t.Fatalf("persisted ExtraContent = %#v, want Google sig-persisted", toolCall.ExtraContent)
 	}
 }
 

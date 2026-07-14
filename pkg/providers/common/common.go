@@ -78,15 +78,24 @@ type openaiMessage struct {
 }
 
 type openaiToolCall struct {
-	ID       string              `json:"id"`
-	Type     string              `json:"type,omitempty"`
-	Function *openaiFunctionCall `json:"function,omitempty"`
+	ID           string                      `json:"id"`
+	Type         string                      `json:"type,omitempty"`
+	Function     *openaiFunctionCall         `json:"function,omitempty"`
+	ExtraContent *openaiToolCallExtraContent `json:"extra_content,omitempty"`
 }
 
 type openaiFunctionCall struct {
 	Name             string `json:"name"`
 	Arguments        string `json:"arguments"`
 	ThoughtSignature string `json:"thought_signature,omitempty"`
+}
+
+// openaiToolCallExtraContent is deliberately narrower than ExtraContent.
+// Google thought signatures are provider-owned wire metadata and must be
+// replayed at the same location. ToolFeedbackExplanation is UI-only metadata
+// and must never be sent to an LLM endpoint.
+type openaiToolCallExtraContent struct {
+	Google *GoogleExtra `json:"google,omitempty"`
 }
 
 // SerializeMessages converts internal Message structs to the OpenAI wire format.
@@ -167,24 +176,37 @@ func serializeToolCalls(toolCalls []ToolCall) []openaiToolCall {
 			ID:   tc.ID,
 			Type: tc.Type,
 		}
+		googleThoughtSignature := ""
+		if tc.ExtraContent != nil && tc.ExtraContent.Google != nil {
+			googleThoughtSignature = tc.ExtraContent.Google.ThoughtSignature
+		}
+		if googleThoughtSignature != "" {
+			wireCall.ExtraContent = &openaiToolCallExtraContent{
+				Google: &GoogleExtra{ThoughtSignature: googleThoughtSignature},
+			}
+		}
 
 		if tc.Function != nil {
-			thoughtSignature := tc.Function.ThoughtSignature
-			if thoughtSignature == "" {
-				thoughtSignature = tc.ThoughtSignature
-			}
-			if thoughtSignature == "" && tc.ExtraContent != nil && tc.ExtraContent.Google != nil {
-				thoughtSignature = tc.ExtraContent.Google.ThoughtSignature
+			functionThoughtSignature := ""
+			// Preserve the provider's original wire location. When Google metadata
+			// exists, Cloudflare/Gemini expects the signature in extra_content and
+			// ignores function.thought_signature.
+			if googleThoughtSignature == "" {
+				functionThoughtSignature = tc.Function.ThoughtSignature
+				if functionThoughtSignature == "" {
+					functionThoughtSignature = tc.ThoughtSignature
+				}
 			}
 			wireCall.Function = &openaiFunctionCall{
 				Name:             tc.Function.Name,
 				Arguments:        tc.Function.Arguments,
-				ThoughtSignature: thoughtSignature,
+				ThoughtSignature: functionThoughtSignature,
 			}
-		} else if tc.Name != "" || len(tc.Arguments) > 0 || tc.ThoughtSignature != "" {
-			thoughtSignature := tc.ThoughtSignature
-			if thoughtSignature == "" && tc.ExtraContent != nil && tc.ExtraContent.Google != nil {
-				thoughtSignature = tc.ExtraContent.Google.ThoughtSignature
+		} else if tc.Name != "" || len(tc.Arguments) > 0 || tc.ThoughtSignature != "" ||
+			googleThoughtSignature != "" {
+			functionThoughtSignature := ""
+			if googleThoughtSignature == "" {
+				functionThoughtSignature = tc.ThoughtSignature
 			}
 			argsJSON := "{}"
 			if len(tc.Arguments) > 0 {
@@ -195,7 +217,7 @@ func serializeToolCalls(toolCalls []ToolCall) []openaiToolCall {
 			wireCall.Function = &openaiFunctionCall{
 				Name:             tc.Name,
 				Arguments:        argsJSON,
-				ThoughtSignature: thoughtSignature,
+				ThoughtSignature: functionThoughtSignature,
 			}
 		}
 
@@ -275,12 +297,17 @@ func ParseResponse(body io.Reader) (*LLMResponse, error) {
 		arguments := make(map[string]any)
 		name := ""
 
-		thoughtSignature := ""
+		functionThoughtSignature := ""
 		if tc.Function != nil {
-			thoughtSignature = tc.Function.ThoughtSignature
+			functionThoughtSignature = tc.Function.ThoughtSignature
 		}
-		if thoughtSignature == "" && tc.ExtraContent != nil && tc.ExtraContent.Google != nil {
-			thoughtSignature = tc.ExtraContent.Google.ThoughtSignature
+		googleThoughtSignature := ""
+		if tc.ExtraContent != nil && tc.ExtraContent.Google != nil {
+			googleThoughtSignature = tc.ExtraContent.Google.ThoughtSignature
+		}
+		thoughtSignature := functionThoughtSignature
+		if thoughtSignature == "" {
+			thoughtSignature = googleThoughtSignature
 		}
 
 		if tc.Function != nil {
@@ -295,16 +322,16 @@ func ParseResponse(body io.Reader) (*LLMResponse, error) {
 			ThoughtSignature: thoughtSignature,
 		}
 
-		if thoughtSignature != "" || tc.ExtraContent != nil {
+		if googleThoughtSignature != "" || tc.ExtraContent != nil {
 			extraContent := &ExtraContent{
 				ToolFeedbackExplanation: "",
 			}
 			if tc.ExtraContent != nil {
 				extraContent.ToolFeedbackExplanation = tc.ExtraContent.ToolFeedbackExplanation
 			}
-			if thoughtSignature != "" {
+			if googleThoughtSignature != "" {
 				extraContent.Google = &GoogleExtra{
-					ThoughtSignature: thoughtSignature,
+					ThoughtSignature: googleThoughtSignature,
 				}
 			}
 			if extraContent.Google != nil || strings.TrimSpace(extraContent.ToolFeedbackExplanation) != "" {

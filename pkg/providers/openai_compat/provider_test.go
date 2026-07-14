@@ -64,6 +64,86 @@ func TestProviderChat_UsesMaxCompletionTokensForGLM(t *testing.T) {
 	}
 }
 
+func TestProviderChat_ReplaysGoogleThoughtSignatureInExtraContent(t *testing.T) {
+	var requestBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer server.Close()
+
+	p := NewProvider("key", server.URL, "")
+	_, err := p.Chat(
+		t.Context(),
+		[]Message{
+			{Role: "user", Content: "write a file"},
+			{
+				Role: "assistant",
+				ToolCalls: []ToolCall{{
+					ID:   "call_1",
+					Type: "function",
+					Function: &FunctionCall{
+						Name:             "write_file",
+						Arguments:        `{"path":"aaa.txt","content":"aaaaaa"}`,
+						ThoughtSignature: "sig-google",
+					},
+					ThoughtSignature: "sig-google",
+					ExtraContent: &ExtraContent{
+						Google:                  &GoogleExtra{ThoughtSignature: "sig-google"},
+						ToolFeedbackExplanation: "Writing file",
+					},
+				}},
+			},
+			{Role: "tool", Content: "done", ToolCallID: "call_1"},
+		},
+		nil,
+		"gemini-3.1-flash-lite",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+
+	messages, ok := requestBody["messages"].([]any)
+	if !ok || len(messages) != 3 {
+		t.Fatalf("messages = %#v, want three messages", requestBody["messages"])
+	}
+	assistant, ok := messages[1].(map[string]any)
+	if !ok {
+		t.Fatalf("assistant message = %#v, want object", messages[1])
+	}
+	toolCalls, ok := assistant["tool_calls"].([]any)
+	if !ok || len(toolCalls) != 1 {
+		t.Fatalf("tool_calls = %#v, want one tool call", assistant["tool_calls"])
+	}
+	toolCall, ok := toolCalls[0].(map[string]any)
+	if !ok {
+		t.Fatalf("tool call = %#v, want object", toolCalls[0])
+	}
+	function, ok := toolCall["function"].(map[string]any)
+	if !ok {
+		t.Fatalf("function = %#v, want object", toolCall["function"])
+	}
+	if _, exists := function["thought_signature"]; exists {
+		t.Fatalf("function should not contain Google thought_signature: %#v", function)
+	}
+	extraContent, ok := toolCall["extra_content"].(map[string]any)
+	if !ok {
+		t.Fatalf("extra_content = %#v, want object", toolCall["extra_content"])
+	}
+	google, ok := extraContent["google"].(map[string]any)
+	if !ok || google["thought_signature"] != "sig-google" {
+		t.Fatalf("extra_content.google = %#v, want sig-google", extraContent["google"])
+	}
+	if _, exists := extraContent["tool_feedback_explanation"]; exists {
+		t.Fatalf("internal tool feedback leaked into request: %#v", extraContent)
+	}
+}
+
 func TestBuildRequestBody_DisablesDoubaoThinkingWhenThinkingLevelOff(t *testing.T) {
 	p := NewProvider("key", "https://ark.cn-beijing.volces.com/api/v3", "")
 	p.SetProviderName("openai")
@@ -1521,6 +1601,51 @@ func TestProviderChatStream_ParsesReasoningContent(t *testing.T) {
 	}
 	if out.Usage == nil || out.Usage.TotalTokens != 16 {
 		t.Fatalf("Usage = %#v, want total tokens 16", out.Usage)
+	}
+}
+
+func TestProviderChatStream_PreservesGoogleThoughtSignature(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"write_file\",\"arguments\":\"{\\\"path\\\":\\\"aaa.txt\\\"}\"},\"extra_content\":{\"google\":{\"thought_signature\":\"sig-stream\"}}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+		))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	p := NewProvider("key", server.URL, "")
+	out, err := p.ChatStream(
+		t.Context(),
+		[]Message{{Role: "user", Content: "write a file"}},
+		nil,
+		"gemini-3.1-flash-lite",
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("ChatStream() error = %v", err)
+	}
+	if len(out.ToolCalls) != 1 {
+		t.Fatalf("ToolCalls = %#v, want one tool call", out.ToolCalls)
+	}
+	toolCall := out.ToolCalls[0]
+	if toolCall.ThoughtSignature != "sig-stream" {
+		t.Fatalf("ThoughtSignature = %q, want sig-stream", toolCall.ThoughtSignature)
+	}
+	if toolCall.ExtraContent == nil || toolCall.ExtraContent.Google == nil ||
+		toolCall.ExtraContent.Google.ThoughtSignature != "sig-stream" {
+		t.Fatalf("ExtraContent = %#v, want Google sig-stream", toolCall.ExtraContent)
+	}
+
+	serialized := common.SerializeMessages([]Message{{Role: "assistant", ToolCalls: out.ToolCalls}})
+	data, err := json.Marshal(serialized)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	payload := string(data)
+	if !strings.Contains(payload, `"extra_content":{"google":{"thought_signature":"sig-stream"}}`) {
+		t.Fatalf("serialized stream tool call lost Google signature location: %s", payload)
 	}
 }
 
