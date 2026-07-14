@@ -121,6 +121,9 @@ func (p *Pipeline) tryConfiguredStreamingLLM(
 			}
 			logger.WarnCF("agent", "ChatStream update failed before visible output; retrying with Chat", logFields)
 			publisher.Cancel(ctx)
+			if err := p.waitForSingleCandidateRateLimit(ctx, exec); err != nil {
+				return nil, true, err
+			}
 			fallbackResponse, err := exec.activeProvider.Chat(
 				ctx,
 				messagesForCall,
@@ -143,6 +146,9 @@ func (p *Pipeline) tryConfiguredStreamingLLM(
 				"error":    streamErr.Error(),
 			})
 			publisher.Cancel(ctx)
+			if err := p.waitForSingleCandidateRateLimit(ctx, exec); err != nil {
+				return nil, true, err
+			}
 			fallbackResponse, err := exec.activeProvider.Chat(
 				ctx,
 				messagesForCall,

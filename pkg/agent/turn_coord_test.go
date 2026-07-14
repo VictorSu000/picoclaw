@@ -341,6 +341,82 @@ func TestPipeline_CallLLM_SimpleResponse(t *testing.T) {
 	}
 }
 
+func TestPipeline_CallLLM_SingleCandidateHonorsRPM(t *testing.T) {
+	provider := &sequenceProvider{}
+	al, agent, cleanup := newTurnCoordTestLoop(t, provider)
+	defer cleanup()
+
+	candidate := providers.FallbackCandidate{
+		Provider:    "openai",
+		Model:       "single-model",
+		RPM:         1,
+		IdentityKey: "model_name:single-model",
+	}
+	agent.Model = "single-model"
+	agent.Candidates = []providers.FallbackCandidate{candidate}
+	rl := providers.NewRateLimiterRegistry()
+	rl.RegisterCandidates(agent.Candidates)
+	if err := rl.Wait(context.Background(), candidate.StableKey()); err != nil {
+		t.Fatalf("failed to consume initial RPM token: %v", err)
+	}
+	al.fallback = providers.NewFallbackChain(providers.NewCooldownTracker(), rl)
+
+	pipeline := NewPipeline(al)
+	ts := newTurnState(agent, makeTestProcessOpts("test-session"), turnEventScope{
+		turnID:  "turn-1",
+		context: newTurnContext(nil, nil, nil),
+	})
+	exec, err := pipeline.SetupTurn(context.Background(), ts)
+	if err != nil {
+		t.Fatalf("SetupTurn failed: %v", err)
+	}
+
+	turnCtx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := pipeline.CallLLM(context.Background(), turnCtx, ts, exec, 1); err == nil {
+		t.Fatal("CallLLM should wait for the single candidate's RPM token")
+	}
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	if provider.callCount != 0 {
+		t.Fatalf("provider call count = %d, want 0 while rate limited", provider.callCount)
+	}
+}
+
+func TestAskSideQuestion_SingleCandidateHonorsRPM(t *testing.T) {
+	provider := &sequenceProvider{}
+	al, agent, cleanup := newTurnCoordTestLoop(t, provider)
+	defer cleanup()
+	useTestSideQuestionProvider(al, provider)
+
+	candidate := providers.FallbackCandidate{
+		Provider:    "openai",
+		Model:       "single-model",
+		RPM:         1,
+		IdentityKey: "model_name:single-model",
+	}
+	agent.Model = "single-model"
+	agent.Candidates = []providers.FallbackCandidate{candidate}
+	rl := providers.NewRateLimiterRegistry()
+	rl.RegisterCandidates(agent.Candidates)
+	if err := rl.Wait(context.Background(), candidate.StableKey()); err != nil {
+		t.Fatalf("failed to consume initial RPM token: %v", err)
+	}
+	al.fallback = providers.NewFallbackChain(providers.NewCooldownTracker(), rl)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	opts := makeTestProcessOpts("side-question-session")
+	if _, err := al.askSideQuestion(ctx, agent, &opts, "explain privately"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("askSideQuestion error = %v, want context deadline exceeded", err)
+	}
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	if provider.callCount != 0 {
+		t.Fatalf("provider call count = %d, want 0 while rate limited", provider.callCount)
+	}
+}
+
 func TestPipeline_SetupTurn_ModelNameDoesNotUseFallbackAliasBeforeFallback(t *testing.T) {
 	al, agent, cleanup := newTurnCoordTestLoop(t, &simpleConvProvider{})
 	defer cleanup()

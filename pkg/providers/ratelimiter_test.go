@@ -180,6 +180,28 @@ func TestRateLimiterRegistry_RegisterCandidatesUsesStableIdentity(t *testing.T) 
 	}
 }
 
+func TestFallbackChain_WaitForCandidateUsesStableIdentity(t *testing.T) {
+	candidate := FallbackCandidate{
+		Provider:    "openai",
+		Model:       "gpt-4o",
+		RPM:         1,
+		IdentityKey: "model_name:single",
+	}
+	r := NewRateLimiterRegistry()
+	r.RegisterCandidates([]FallbackCandidate{candidate})
+	chain := NewFallbackChain(NewCooldownTracker(), r)
+
+	if err := chain.WaitForCandidate(context.Background(), candidate); err != nil {
+		t.Fatalf("first call should pass: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := chain.WaitForCandidate(ctx, candidate); err == nil {
+		t.Fatal("second call should wait for the configured RPM token")
+	}
+}
+
 // TestRateLimiter_Concurrency verifies thread safety under concurrent access.
 func TestRateLimiter_Concurrency(t *testing.T) {
 	rpm := 20

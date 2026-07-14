@@ -56,6 +56,16 @@ func NewFallbackChain(cooldown *CooldownTracker, rl *RateLimiterRegistry) *Fallb
 	return &FallbackChain{cooldown: cooldown, rl: rl}
 }
 
+// WaitForCandidate blocks until the candidate's local rate-limit token is
+// available. It is used by direct single-candidate calls, which do not execute
+// the fallback loop but must still honor the configured RPM limit.
+func (fc *FallbackChain) WaitForCandidate(ctx context.Context, candidate FallbackCandidate) error {
+	if fc == nil || fc.rl == nil {
+		return nil
+	}
+	return fc.rl.Wait(ctx, candidate.StableKey())
+}
+
 // ResolveCandidates parses model config into a deduplicated candidate list.
 func ResolveCandidates(cfg ModelConfig, defaultProvider string) []FallbackCandidate {
 	return ResolveCandidatesWithLookup(cfg, defaultProvider, nil)

@@ -386,6 +386,37 @@ func TestConfiguredStreamingEligibilityGates(t *testing.T) {
 	}
 }
 
+func TestConfiguredStreamingSingleCandidateHonorsRPM(t *testing.T) {
+	cfg := newConfiguredStreamingTestConfig(t, true, true, nil)
+	cfg.ModelList[0].RPM = 1
+	msgBus := bus.NewMessageBus()
+	msgBus.SetStreamDelegate(configuredStreamingDelegate{streamer: &recordingStreamer{}})
+	provider := &configuredStreamingProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+	defer al.Close()
+
+	agent := al.GetRegistry().GetDefaultAgent()
+	if agent == nil || len(agent.Candidates) != 1 {
+		t.Fatalf("single candidate not configured: %#v", agent)
+	}
+	if err := al.fallback.WaitForCandidate(context.Background(), agent.Candidates[0]); err != nil {
+		t.Fatalf("failed to consume initial RPM token: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := al.runAgentLoop(ctx, agent, configuredStreamingProcessOptions("pico")); err == nil {
+		t.Fatal("streaming turn should wait for the single candidate's RPM token")
+	}
+	if provider.streamCalls != 0 || provider.chatCalls != 0 {
+		t.Fatalf(
+			"calls = stream:%d chat:%d, want no API call while rate limited",
+			provider.streamCalls,
+			provider.chatCalls,
+		)
+	}
+}
+
 func TestConfiguredStreamingPreChunkFailureFallsBackToChat(t *testing.T) {
 	cfg := newConfiguredStreamingTestConfig(t, true, true, nil)
 	msgBus := bus.NewMessageBus()

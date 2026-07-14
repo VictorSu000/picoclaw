@@ -553,6 +553,11 @@ func (al *AgentLoop) askSideQuestion(
 		if len(activeCandidates) > 0 {
 			candidate = activeCandidates[0]
 		}
+		if len(activeCandidates) == 1 && al.fallback != nil {
+			if err := al.fallback.WaitForCandidate(ctx, candidate); err != nil {
+				return nil, err
+			}
+		}
 		return callProvider(ctx, candidate, llmModel, hookModelChanged, callMessages)
 	}
 

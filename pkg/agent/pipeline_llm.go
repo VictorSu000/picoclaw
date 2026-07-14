@@ -163,6 +163,10 @@ func (p *Pipeline) CallLLM(
 		al.activeRequestsInc()
 		defer al.activeRequestsDec()
 
+		if err := p.waitForSingleCandidateRateLimit(providerCtx, exec); err != nil {
+			return nil, err
+		}
+
 		if response, handled, streamErr := p.tryConfiguredStreamingLLM(
 			providerCtx,
 			ts,
@@ -665,6 +669,16 @@ func (p *Pipeline) CallLLM(
 	}
 
 	return ControlToolLoop, nil
+}
+
+func (p *Pipeline) waitForSingleCandidateRateLimit(
+	ctx context.Context,
+	exec *turnExecution,
+) error {
+	if p == nil || p.Fallback == nil || exec == nil || len(exec.activeCandidates) != 1 {
+		return nil
+	}
+	return p.Fallback.WaitForCandidate(ctx, exec.activeCandidates[0])
 }
 
 func (p *Pipeline) applyBeforeLLMModelRewrite(ts *turnState, exec *turnExecution) {
