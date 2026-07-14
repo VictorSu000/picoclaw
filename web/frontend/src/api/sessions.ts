@@ -38,6 +38,7 @@ export interface SessionDetail {
     }[]
   }[]
   summary: string
+  archived_count?: number
   created: string
   updated: string
 }

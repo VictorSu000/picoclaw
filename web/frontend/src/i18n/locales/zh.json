@@ -56,6 +56,8 @@
     "forking": "分支中…",
     "forkFromHere": "从此处分支对话",
     "forkSessionFailed": "分支会话失败",
+    "compressedHistoryDivider": "以上为已压缩的历史消息 · 仅供查看，不会发送给模型",
+    "contextSummaryLabel": "对话摘要",
     "notConnected": "服务未运行，请先启动以进行对话。",
     "thinking": {
       "step1": "思考中...",

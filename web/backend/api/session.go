@@ -38,6 +38,12 @@ type sessionFile struct {
 	Summary  string              `json:"summary,omitempty"`
 	Created  time.Time           `json:"created"`
 	Updated  time.Time           `json:"updated"`
+
+	// ArchivedRawCount is the number of leading Messages that were dropped from
+	// the active history by context compaction and restored from the archive
+	// file for display. These occupy Messages[:ArchivedRawCount]. Internal only
+	// (never (de)serialized), so legacy JSON sessions leave it at zero.
+	ArchivedRawCount int `json:"-"`
 }
 
 // sessionListItem is a lightweight summary returned by GET /api/sessions.
@@ -174,20 +180,48 @@ func (h *Handler) readSessionMessages(path string, skip int) ([]providers.Messag
 	return msgs, nil
 }
 
+// readArchivedSessionMessages reads the session's archive file (messages dropped
+// from active history by context compaction). Returns an empty slice when the
+// file does not exist. Mirrors readSessionMessages but reads from line 0 since
+// the archive has no skip offset.
+func (h *Handler) readArchivedSessionMessages(path string) ([]providers.Message, error) {
+	msgs, err := h.readSessionMessages(path, 0)
+	if os.IsNotExist(err) {
+		return []providers.Message{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return msgs, nil
+}
+
 func (h *Handler) readJSONLSession(dir, sessionKey string) (sessionFile, error) {
 	base := filepath.Join(dir, sanitizeSessionKey(sessionKey))
 	jsonlPath := base + ".jsonl"
 	metaPath := base + ".meta.json"
+	archivePath := base + ".archive.jsonl"
 
 	meta, err := h.readSessionMeta(metaPath, sessionKey)
 	if err != nil {
 		return sessionFile{}, err
 	}
 
-	messages, err := h.readSessionMessages(jsonlPath, meta.Skip)
+	activeMessages, err := h.readSessionMessages(jsonlPath, meta.Skip)
 	if err != nil {
 		return sessionFile{}, err
 	}
+
+	// Prepend archived (compaction-dropped) messages so the Web UI shows the
+	// full conversation. The archive is chronological and precedes the active
+	// history. The agent loop never reads this file, so these messages stay
+	// out of the LLM context.
+	archived, err := h.readArchivedSessionMessages(archivePath)
+	if err != nil {
+		return sessionFile{}, err
+	}
+	messages := make([]providers.Message, 0, len(archived)+len(activeMessages))
+	messages = append(messages, archived...)
+	messages = append(messages, activeMessages...)
 
 	updated := meta.UpdatedAt
 	created := meta.CreatedAt
@@ -203,11 +237,12 @@ func (h *Handler) readJSONLSession(dir, sessionKey string) (sessionFile, error) 
 	}
 
 	return sessionFile{
-		Key:      meta.Key,
-		Messages: messages,
-		Summary:  meta.Summary,
-		Created:  created,
-		Updated:  updated,
+		Key:              meta.Key,
+		Messages:         messages,
+		Summary:          meta.Summary,
+		Created:          created,
+		Updated:          updated,
+		ArchivedRawCount: len(archived),
 	}, nil
 }
 
@@ -960,13 +995,21 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 	}
 	messages := detailSessionMessages(sess.Messages, toolFeedbackMaxArgsLength)
 
+	// archivedCount is the number of leading transcript entries that come from
+	// the archive (compaction-dropped history). The frontend uses it to render a
+	// "view-only compressed history" divider. detailSessionMessages is
+	// concatenation-preserving, so the archived prefix maps to a stable count.
+	archivedRaw := sess.Messages[:sess.ArchivedRawCount]
+	archivedCount := len(detailSessionMessages(archivedRaw, toolFeedbackMaxArgsLength))
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"id":       sessionID,
-		"messages": messages,
-		"summary":  sess.Summary,
-		"created":  sess.Created.Format(time.RFC3339),
-		"updated":  sess.Updated.Format(time.RFC3339),
+		"id":             sessionID,
+		"messages":       messages,
+		"summary":        sess.Summary,
+		"archived_count": archivedCount,
+		"created":        sess.Created.Format(time.RFC3339),
+		"updated":        sess.Updated.Format(time.RFC3339),
 	})
 }
 
@@ -989,7 +1032,7 @@ func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	removed := false
 	if ref, err := h.findPicoJSONLSession(dir, sessionID); err == nil {
 		base := filepath.Join(dir, sanitizeSessionKey(ref.Key))
-		for _, path := range []string{base + ".jsonl", base + ".meta.json"} {
+		for _, path := range []string{base + ".jsonl", base + ".meta.json", base + ".archive.jsonl"} {
 			if err := os.Remove(path); err != nil {
 				if os.IsNotExist(err) {
 					continue

@@ -27,6 +27,12 @@ type aliasPromotingStore interface {
 	PromoteAliasHistory(ctx context.Context, sessionKey string, scope json.RawMessage, aliases []string) (bool, error)
 }
 
+// archivingStore is the optional memory.Store capability used to persist
+// compaction-dropped messages into a per-session archive file.
+type archivingStore interface {
+	ArchiveMessages(ctx context.Context, sessionKey string, msgs []providers.Message) error
+}
+
 // MetadataAwareSessionStore exposes structured session metadata operations.
 type MetadataAwareSessionStore interface {
 	EnsureSessionMetadata(sessionKey string, scope *SessionScope, aliases []string)
@@ -170,6 +176,23 @@ func (b *JSONLBackend) TruncateHistory(key string, keepLast int) {
 	key = b.resolveSessionKey(key)
 	if err := b.store.TruncateHistory(context.Background(), key, keepLast); err != nil {
 		log.Printf("session: truncate history: %v", err)
+	}
+}
+
+// ArchiveMessages preserves compaction-dropped messages in the session's
+// archive when the backing store supports archiving. It is a no-op for stores
+// that do not implement archivingStore. Fire-and-forget: errors are logged.
+func (b *JSONLBackend) ArchiveMessages(key string, msgs []providers.Message) {
+	if len(msgs) == 0 {
+		return
+	}
+	store, ok := b.store.(archivingStore)
+	if !ok {
+		return
+	}
+	key = b.resolveSessionKey(key)
+	if err := store.ArchiveMessages(context.Background(), key, msgs); err != nil {
+		log.Printf("session: archive messages: %v", err)
 	}
 }
 

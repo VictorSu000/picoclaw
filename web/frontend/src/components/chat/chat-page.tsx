@@ -1,4 +1,4 @@
-import { IconGitFork, IconPlus } from "@tabler/icons-react"
+import { IconChevronDown, IconChevronUp, IconGitFork, IconPlus } from "@tabler/icons-react"
 import { useAtom } from "jotai"
 import {
   type ChangeEvent,
@@ -106,6 +106,65 @@ function resolveChatInputDisabledReason({
   return null
 }
 
+/**
+ * CompressedHistoryNotice marks the boundary between compaction-archived
+ * (view-only) history and the active conversation. It optionally shows a
+ * divider above the active region and a collapsible summary of the compressed
+ * history. The archived messages and this summary are never sent back into the
+ * LLM context when the conversation continues.
+ */
+function CompressedHistoryNotice({
+  summary,
+  showDivider,
+}: {
+  summary?: string
+  showDivider: boolean
+}) {
+  const { t } = useTranslation()
+  const [expanded, setExpanded] = useState(false)
+  const hasSummary = Boolean(summary && summary.trim())
+
+  if (!showDivider && !hasSummary) {
+    return null
+  }
+
+  return (
+    <div className="my-4 flex flex-col gap-2">
+      {showDivider && (
+        <div className="flex items-center gap-3">
+          <div className="border-border/60 h-px flex-1 border-t border-dashed" />
+          <span className="text-muted-foreground/70 text-xs whitespace-nowrap">
+            {t("chat.compressedHistoryDivider")}
+          </span>
+          <div className="border-border/60 h-px flex-1 border-t border-dashed" />
+        </div>
+      )}
+      {hasSummary && (
+        <div className="border-border/60 bg-muted/40 rounded-lg border px-3 py-2">
+          <button
+            type="button"
+            onClick={() => setExpanded((value) => !value)}
+            className="text-muted-foreground hover:text-foreground flex w-full items-center justify-between gap-2 text-xs font-medium"
+            aria-expanded={expanded}
+          >
+            <span>{t("chat.contextSummaryLabel")}</span>
+            {expanded ? (
+              <IconChevronUp className="size-4" />
+            ) : (
+              <IconChevronDown className="size-4" />
+            )}
+          </button>
+          {expanded && (
+            <p className="text-muted-foreground mt-2 text-sm whitespace-pre-wrap">
+              {summary}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function ChatPage() {
   const { t } = useTranslation()
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -139,6 +198,8 @@ export function ChatPage() {
     isTyping,
     activeSessionId,
     contextUsage,
+    sessionSummary,
+    archivedMessageCount,
     sendMessage,
     switchSession,
     newChat,
@@ -425,11 +486,44 @@ export function ChatPage() {
               shouldShowAssistantMessage(assistantDetailVisibility, msg.kind),
             )
 
+            // Map the archived transcript-entry count onto the visible list:
+            // archived entries that are hidden by the current detail filter
+            // must not shift the divider position.
+            const archivedTranscriptCount = archivedMessageCount ?? 0
+            let visibleArchivedCount = 0
+            for (
+              let i = 0;
+              i < messages.length && i < archivedTranscriptCount;
+              i++
+            ) {
+              if (
+                shouldShowAssistantMessage(
+                  assistantDetailVisibility,
+                  messages[i].kind,
+                )
+              ) {
+                visibleArchivedCount++
+              }
+            }
+            const hasSummary = Boolean(
+              sessionSummary && sessionSummary.trim(),
+            )
+
             return visibleMessages.map((msg, visibleIndex) => {
               const isForking = forkingMessageIndex === visibleIndex
+              const isArchived = visibleIndex < visibleArchivedCount
+              const showNoticeBefore =
+                visibleIndex === visibleArchivedCount &&
+                (visibleArchivedCount > 0 || hasSummary)
 
               return (
                 <div key={msg.id}>
+                  {showNoticeBefore && (
+                    <CompressedHistoryNotice
+                      summary={sessionSummary}
+                      showDivider={visibleArchivedCount > 0}
+                    />
+                  )}
                   {/* Fork button between messages – only after user or assistant "normal" messages. */}
                   {visibleIndex > 0 && (() => {
                     const prevMsg = visibleMessages[visibleIndex - 1]
@@ -463,7 +557,9 @@ export function ChatPage() {
                     )
                   })()}
 
-                  <div className="flex w-full">
+                  <div
+                    className={`flex w-full ${isArchived ? "opacity-60" : ""}`}
+                  >
                     {msg.role === "assistant" ? (
                       <AssistantMessage
                         content={msg.content}

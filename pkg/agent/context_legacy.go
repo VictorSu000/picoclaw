@@ -10,6 +10,7 @@ import (
 	runtimeevents "github.com/sipeed/picoclaw/pkg/events"
 	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/providers"
+	"github.com/sipeed/picoclaw/pkg/session"
 )
 
 // legacyContextManager wraps the existing summarization/compression logic
@@ -109,6 +110,20 @@ type compressionResult struct {
 	RemainingMessages int
 }
 
+// archiveDropped preserves messages that compaction is about to drop so the
+// Web UI can still display the full conversation. It is a no-op when the
+// session store does not implement archiving (e.g. the in-memory subturn
+// store). Archived messages are never returned by GetHistory, so they never
+// re-enter the LLM context.
+func archiveDropped(sessions session.SessionStore, sessionKey string, dropped []providers.Message) {
+	if len(dropped) == 0 {
+		return
+	}
+	if archiver, ok := sessions.(session.ArchivingSessionStore); ok {
+		archiver.ArchiveMessages(sessionKey, dropped)
+	}
+}
+
 // forceCompression aggressively reduces context when the limit is hit.
 // It drops the oldest ~50% of Turns (a Turn is a complete user→LLM→response
 // cycle, as defined in #1316), so tool-call sequences are never split.
@@ -130,19 +145,26 @@ func (m *legacyContextManager) forceCompression(sessionKey string) (compressionR
 	} else {
 		mid = findSafeBoundary(history, len(history)/2)
 	}
-	var keptHistory []providers.Message
-	if mid <= 0 {
+
+	// cut is the boundary index: kept = history[cut:], dropped = history[:cut].
+	// Keeping a clean suffix (rather than a lone user message) lets the dropped
+	// prefix be archived in chronological order for Web UI display.
+	cut := mid
+	if cut <= 0 {
+		// No safe turn boundary near the midpoint. Fall back to the last user
+		// message so the kept suffix still starts at a turn boundary. If none
+		// exists (single-turn history), cut stays 0 and nothing is dropped.
 		for i := len(history) - 1; i >= 0; i-- {
 			if history[i].Role == "user" {
-				keptHistory = []providers.Message{history[i]}
+				cut = i
 				break
 			}
 		}
-	} else {
-		keptHistory = history[mid:]
 	}
+	keptHistory := history[cut:]
+	dropped := history[:cut]
 
-	droppedCount := len(history) - len(keptHistory)
+	droppedCount := len(dropped)
 
 	existingSummary := agent.Sessions.GetSummary(sessionKey)
 	compressionNote := fmt.Sprintf(
@@ -153,6 +175,10 @@ func (m *legacyContextManager) forceCompression(sessionKey string) (compressionR
 		compressionNote = existingSummary + "\n\n" + compressionNote
 	}
 	agent.Sessions.SetSummary(sessionKey, compressionNote)
+
+	// Archive the dropped prefix BEFORE rewriting the active history, so the
+	// messages survive the SetHistory rewrite and remain viewable in the Web UI.
+	archiveDropped(agent.Sessions, sessionKey, dropped)
 
 	agent.Sessions.SetHistory(sessionKey, keptHistory)
 	agent.Sessions.Save(sessionKey)
@@ -244,6 +270,11 @@ func (m *legacyContextManager) summarizeSession(agent *AgentInstance, sessionKey
 
 	if finalSummary != "" {
 		agent.Sessions.SetSummary(sessionKey, finalSummary)
+		// Archive the messages being dropped BEFORE truncating, so they survive
+		// the TruncateHistory + Compact that follows and stay viewable in the
+		// Web UI. history[:safeCut] is the exact dropped set (including tool
+		// messages), matching TruncateHistory(keepCount) which keeps history[safeCut:].
+		archiveDropped(agent.Sessions, sessionKey, toSummarize)
 		agent.Sessions.TruncateHistory(sessionKey, keepCount)
 		agent.Sessions.Save(sessionKey)
 		m.al.emitEvent(

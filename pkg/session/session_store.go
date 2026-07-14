@@ -32,3 +32,16 @@ type SessionStore interface {
 	// Close releases resources held by the store.
 	Close() error
 }
+
+// ArchivingSessionStore is an optional interface a SessionStore may implement to
+// preserve messages that context compaction drops from the active history.
+// Archived messages are display-only (surfaced by the Web UI) and are never
+// returned by GetHistory, so they never re-enter the LLM context.
+//
+// Callers should type-assert to this interface and skip archiving when the
+// backing store does not implement it (e.g. the in-memory subturn store).
+type ArchivingSessionStore interface {
+	// ArchiveMessages appends dropped messages to the session's archive in
+	// chronological order. Fire-and-forget: implementations log failures.
+	ArchiveMessages(sessionKey string, msgs []providers.Message)
+}

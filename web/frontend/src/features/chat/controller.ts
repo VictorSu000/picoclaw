@@ -268,7 +268,7 @@ export async function hydrateActiveSession() {
   }
 
   hydratePromise = loadSessionMessages(storedSessionId)
-    .then((historyMessages) => {
+    .then(({ messages: historyMessages, summary, archivedCount }) => {
       const currentState = getChatState()
       if (currentState.activeSessionId !== storedSessionId) {
         return
@@ -281,6 +281,8 @@ export async function hydrateActiveSession() {
             currentState.messages,
           ),
           hasHydratedActiveSession: true,
+          sessionSummary: summary,
+          archivedMessageCount: archivedCount,
         })
         return
       }
@@ -289,6 +291,8 @@ export async function hydrateActiveSession() {
         messages: historyMessages,
         isTyping: false,
         hasHydratedActiveSession: true,
+        sessionSummary: summary,
+        archivedMessageCount: archivedCount,
       })
     })
     .catch((error) => {
@@ -389,7 +393,8 @@ export async function switchChatSession(sessionId: string) {
   }
 
   try {
-    const historyMessages = await loadSessionMessages(sessionId)
+    const { messages: historyMessages, summary, archivedCount } =
+      await loadSessionMessages(sessionId)
 
     disconnectChatInternal({ clearDesiredConnection: false })
     setActiveSessionId(sessionId)
@@ -398,6 +403,8 @@ export async function switchChatSession(sessionId: string) {
       isTyping: false,
       hasHydratedActiveSession: true,
       contextUsage: undefined,
+      sessionSummary: summary,
+      archivedMessageCount: archivedCount,
     })
 
     if (store.get(gatewayAtom).status === "running") {
@@ -422,6 +429,8 @@ export async function newChatSession() {
     isTyping: false,
     hasHydratedActiveSession: true,
     contextUsage: undefined,
+    sessionSummary: undefined,
+    archivedMessageCount: undefined,
   })
 
   if (store.get(gatewayAtom).status === "running") {
@@ -477,7 +486,8 @@ export async function forkChatSession(visibleIndex: number) {
   }
 
   try {
-    const historyMessages = await loadSessionMessages(newSessionId)
+    const { messages: historyMessages, summary, archivedCount } =
+      await loadSessionMessages(newSessionId)
 
     disconnectChatInternal({ clearDesiredConnection: false })
     setActiveSessionId(newSessionId)
@@ -486,6 +496,8 @@ export async function forkChatSession(visibleIndex: number) {
       isTyping: false,
       hasHydratedActiveSession: true,
       contextUsage: undefined,
+      sessionSummary: summary,
+      archivedMessageCount: archivedCount,
     })
 
     if (store.get(gatewayAtom).status === "running") {

@@ -71,6 +71,12 @@ export interface ChatStoreState {
   activeSessionId: string
   hasHydratedActiveSession: boolean
   contextUsage?: ContextUsage
+  // sessionSummary is the compaction summary for the loaded session, shown in
+  // the Web UI (it is also injected into the LLM context server-side).
+  sessionSummary?: string
+  // archivedMessageCount is the number of leading visible messages restored
+  // from the compaction archive (view-only; not part of the LLM context).
+  archivedMessageCount?: number
 }
 
 type ChatStorePatch = Partial<ChatStoreState>

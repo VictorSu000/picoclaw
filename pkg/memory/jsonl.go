@@ -95,6 +95,15 @@ func (s *JSONLStore) metaPath(key string) string {
 	return filepath.Join(s.dir, sanitizeKey(key)+".meta.json")
 }
 
+// archivePath returns the path of the session's archive file. The archive is a
+// separate append-only JSONL file that preserves messages dropped from the
+// active history by context compaction. It exists purely so the Web UI can
+// display the full conversation; the agent loop never reads it, so archived
+// messages never re-enter the LLM context.
+func (s *JSONLStore) archivePath(key string) string {
+	return filepath.Join(s.dir, sanitizeKey(key)+".archive.jsonl")
+}
+
 // sanitizeKey converts a session key to a safe filename component.
 // Mirrors pkg/session.sanitizeFilename so that migration paths match.
 // Replaces ':' with '_' (session key separator) and '/' and '\' with '_'
@@ -673,6 +682,76 @@ func (s *JSONLStore) GetHistory(
 	}
 
 	return msgs, nil
+}
+
+// ArchiveMessages appends messages to the session's archive file, preserving
+// history that context compaction is about to drop from the active JSONL.
+// It is append-only and fsynced, mirroring addMsg's durability. Callers invoke
+// it BEFORE truncating/rewriting the active history, so the messages survive
+// the subsequent Compact/rewrite. The archive is display-only: it is never
+// read by the agent loop, so archived messages never re-enter the LLM context.
+func (s *JSONLStore) ArchiveMessages(
+	_ context.Context, sessionKey string, msgs []providers.Message,
+) error {
+	if len(msgs) == 0 {
+		return nil
+	}
+
+	l := s.sessionLock(sessionKey)
+	l.Lock()
+	defer l.Unlock()
+
+	var buf bytes.Buffer
+	for _, msg := range msgs {
+		if messageutil.IsTransientAssistantThoughtMessage(msg) {
+			continue
+		}
+		line, err := json.Marshal(msg)
+		if err != nil {
+			return fmt.Errorf("memory: marshal archived message: %w", err)
+		}
+		buf.Write(line)
+		buf.WriteByte('\n')
+	}
+	if buf.Len() == 0 {
+		return nil
+	}
+
+	f, err := os.OpenFile(
+		s.archivePath(sessionKey),
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND,
+		0o644,
+	)
+	if err != nil {
+		return fmt.Errorf("memory: open archive for append: %w", err)
+	}
+	if _, err := f.Write(buf.Bytes()); err != nil {
+		f.Close()
+		return fmt.Errorf("memory: append archived messages: %w", err)
+	}
+	// Flush to physical storage before closing, matching addMsg's durability
+	// guarantee so a power loss cannot lose archived history.
+	if syncErr := f.Sync(); syncErr != nil {
+		f.Close()
+		return fmt.Errorf("memory: sync archive: %w", syncErr)
+	}
+	if closeErr := f.Close(); closeErr != nil {
+		return fmt.Errorf("memory: close archive: %w", closeErr)
+	}
+	return nil
+}
+
+// ReadArchivedMessages returns all messages archived for a session, in the
+// chronological order they were dropped by compaction. Returns an empty slice
+// when no archive file exists.
+func (s *JSONLStore) ReadArchivedMessages(
+	_ context.Context, sessionKey string,
+) ([]providers.Message, error) {
+	l := s.sessionLock(sessionKey)
+	l.Lock()
+	defer l.Unlock()
+
+	return readMessages(s.archivePath(sessionKey), 0)
 }
 
 func (s *JSONLStore) GetSummary(
