@@ -97,6 +97,8 @@ type processOptions struct {
 	UserMessage             string          // User message content (may include prefix)
 	ForcedSkills            []string        // Skills explicitly requested for this message
 	TurnProfile             config.EffectiveTurnProfile
+	AgentPreset             config.EffectiveAgentPreset
+	AgentPresetResolved     bool
 	SystemPromptOverride    string                 // Override the default system prompt (Used by SubTurns)
 	Media                   []string               // media:// refs from inbound message
 	InitialSteeringMessages []providers.Message    // Steering messages from refactor/agent
@@ -443,6 +445,9 @@ func (al *AgentLoop) ReloadProviderAndConfig(
 		if agent, ok := registry.GetAgent(agentID); ok {
 			newRL.RegisterCandidates(agent.Candidates)
 			newRL.RegisterCandidates(agent.LightCandidates)
+			for _, candidates := range agent.PresetCandidates {
+				newRL.RegisterCandidates(candidates)
+			}
 		}
 	}
 	al.fallback = providers.NewFallbackChain(providers.NewCooldownTracker(), newRL)
@@ -533,6 +538,10 @@ func (al *AgentLoop) runAgentLoop(
 	opts = normalizeProcessOptions(opts)
 	var err error
 	opts, err = resolveTurnProfileOptions(al.GetConfig(), opts)
+	if err != nil {
+		return "", err
+	}
+	opts, err = al.resolveAgentPresetOptions(agent, opts)
 	if err != nil {
 		return "", err
 	}

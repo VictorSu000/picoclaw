@@ -59,6 +59,9 @@ type AgentInstance struct {
 	// instances. This allows each fallback model to use its own api_base and api_key
 	// from model_list, instead of inheriting the primary model's provider config.
 	CandidateProviders map[string]providers.LLMProvider
+	// PresetCandidates holds pre-resolved model candidates for named agent
+	// presets so turns can switch models without mutating the AgentInstance.
+	PresetCandidates map[string][]providers.FallbackCandidate
 }
 
 // NewAgentInstance creates an agent instance from config.
@@ -212,6 +215,22 @@ func NewAgentInstance(
 		imageNames := append([]string{defaults.ImageModel}, defaults.ImageModelFallbacks...)
 		populateCandidateProvidersFromNames(cfg, workspace, imageNames, candidateProviders)
 	}
+	presetCandidates := make(map[string][]providers.FallbackCandidate)
+	for _, presetName := range cfg.AgentPresetNames() {
+		preset, found, err := cfg.ResolveAgentPreset(presetName)
+		if err != nil || !found || preset.Model == nil {
+			continue
+		}
+		resolved := resolveModelCandidates(
+			cfg,
+			defaults.Provider,
+			preset.Model.Primary,
+			preset.Model.Fallbacks,
+		)
+		presetCandidates[strings.ToLower(preset.Name)] = resolved
+		modelNames := append([]string{preset.Model.Primary}, preset.Model.Fallbacks...)
+		populateCandidateProvidersFromNames(cfg, workspace, modelNames, candidateProviders)
+	}
 
 	// Model routing setup: pre-resolve light model candidates at creation time
 	// to avoid repeated model_list lookups on every incoming message.
@@ -281,6 +300,7 @@ func NewAgentInstance(
 		LightCandidates:           lightCandidates,
 		LightProvider:             lightProvider,
 		CandidateProviders:        candidateProviders,
+		PresetCandidates:          presetCandidates,
 	}
 }
 

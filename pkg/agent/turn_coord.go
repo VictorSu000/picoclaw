@@ -439,6 +439,14 @@ func (al *AgentLoop) askSideQuestion(
 
 	activeCandidates, activeModel, usedLight := al.selectCandidates(agent, question, messages)
 	selectedModelName := sideQuestionModelName(agent, usedLight)
+	if opts != nil && opts.AgentPreset.Enabled() && opts.AgentPreset.Model != nil {
+		activeCandidates = append(
+			[]providers.FallbackCandidate(nil),
+			agent.PresetCandidates[strings.ToLower(opts.AgentPreset.Name)]...,
+		)
+		activeModel = resolvedCandidateModel(activeCandidates, opts.AgentPreset.Model.Primary)
+		selectedModelName = opts.AgentPreset.Model.Primary
+	}
 
 	llmOpts := map[string]any{
 		"max_tokens":       agent.MaxTokens,

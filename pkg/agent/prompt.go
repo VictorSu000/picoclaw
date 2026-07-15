@@ -123,6 +123,8 @@ type PromptBuildRequest struct {
 	SuppressToolUseRule         bool
 	AllowedSkills               []string
 	AllowedTools                []string
+	AllowedMCPServers           []string
+	RestrictMCPServers          bool
 	ToolUseFallback             bool
 }
 

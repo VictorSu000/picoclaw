@@ -28,6 +28,10 @@ func (al *AgentLoop) handleCommand(
 		return "", false
 	}
 
+	if matched, handled, reply := al.applyPresetCommand(msg.Content, agent, opts); matched {
+		return reply, handled
+	}
+
 	if matched, handled, reply := al.applyExplicitSkillCommand(msg.Content, agent, opts); matched {
 		return reply, handled
 	}
@@ -83,7 +87,13 @@ func (al *AgentLoop) applyExplicitSkillCommand(
 
 	parts := strings.Fields(strings.TrimSpace(raw))
 	if len(parts) < 2 {
-		return true, true, buildUseCommandHelp(agent)
+		preset := config.EffectiveAgentPreset{}
+		if opts != nil {
+			preset = opts.AgentPreset
+		}
+		return true, true, buildUseCommandHelpForNames(
+			agentPresetSkillNames(agent, preset),
+		)
 	}
 
 	arg := strings.TrimSpace(parts[1])
@@ -97,6 +107,13 @@ func (al *AgentLoop) applyExplicitSkillCommand(
 	skillName, ok := agent.ContextBuilder.ResolveSkillName(arg)
 	if !ok {
 		return true, true, fmt.Sprintf("Unknown skill: %s\nUse /list skills to see installed skills.", arg)
+	}
+	if opts != nil && !agentPresetSkillAllowed(opts.AgentPreset, skillName) {
+		return true, true, fmt.Sprintf(
+			"Skill %q is not enabled by agent preset %q.",
+			skillName,
+			opts.AgentPreset.Name,
+		)
 	}
 
 	if len(parts) < 3 {
@@ -112,7 +129,13 @@ func (al *AgentLoop) applyExplicitSkillCommand(
 
 	message := strings.TrimSpace(strings.Join(parts[2:], " "))
 	if message == "" {
-		return true, true, buildUseCommandHelp(agent)
+		preset := config.EffectiveAgentPreset{}
+		if opts != nil {
+			preset = opts.AgentPreset
+		}
+		return true, true, buildUseCommandHelpForNames(
+			agentPresetSkillNames(agent, preset),
+		)
 	}
 
 	if opts != nil {
@@ -122,6 +145,146 @@ func (al *AgentLoop) applyExplicitSkillCommand(
 	}
 
 	return true, false, ""
+}
+
+func (al *AgentLoop) applyPresetCommand(
+	raw string,
+	agent *AgentInstance,
+	opts *processOptions,
+) (matched bool, handled bool, reply string) {
+	normalizeProcessOptionsInPlace(opts)
+	cmdName, ok := commands.CommandName(raw)
+	if !ok || cmdName != "preset" {
+		return false, false, ""
+	}
+	if agent == nil || opts == nil {
+		return true, true, "Agent preset command is unavailable in the current context."
+	}
+
+	parts := strings.Fields(strings.TrimSpace(raw))
+	if len(parts) == 1 {
+		name := config.DefaultAgentPresetName
+		if opts.AgentPreset.Enabled() {
+			name = opts.AgentPreset.Name
+		}
+		return true, true, fmt.Sprintf("Current agent preset: %s", name)
+	}
+
+	cfg := al.GetConfig()
+	action := strings.ToLower(strings.TrimSpace(parts[1]))
+	switch action {
+	case "list":
+		names := cfg.AgentPresetNames()
+		if len(names) == 0 {
+			return true, true, "No agent presets configured. Current behavior: default."
+		}
+		return true, true, fmt.Sprintf(
+			"Agent Presets:\n- default (no preset)\n- %s",
+			strings.Join(names, "\n- "),
+		)
+
+	case "show":
+		name := config.DefaultAgentPresetName
+		if len(parts) >= 3 {
+			name = parts[2]
+		} else if opts.AgentPreset.Enabled() {
+			name = opts.AgentPreset.Name
+		}
+		preset, found, err := cfg.ResolveAgentPreset(name)
+		if err != nil {
+			return true, true, err.Error()
+		}
+		if !found {
+			return true, true, "Agent preset default: use the routed agent's existing model, tools, skills, and MCP servers."
+		}
+		return true, true, formatAgentPreset(preset)
+
+	case "use":
+		if len(parts) != 3 {
+			return true, true, "Usage: /preset use <name>"
+		}
+		copyOpts := *opts
+		if err := applyAgentPresetToOptions(cfg, agent, &copyOpts, parts[2]); err != nil {
+			return true, true, err.Error()
+		}
+		storedName := ""
+		if copyOpts.AgentPreset.Enabled() {
+			storedName = copyOpts.AgentPreset.Name
+		}
+		if err := setSessionAgentPreset(agent, opts.Dispatch.SessionKey, storedName); err != nil {
+			return true, true, fmt.Sprintf("Failed to save agent preset: %v", err)
+		}
+		al.clearPendingSkills(opts.Dispatch.SessionKey)
+		if storedName == "" {
+			return true, true, "Agent preset reset to default."
+		}
+		return true, true, fmt.Sprintf("Agent preset switched to %q for this session.", storedName)
+
+	case "reset":
+		if err := setSessionAgentPreset(agent, opts.Dispatch.SessionKey, ""); err != nil {
+			return true, true, fmt.Sprintf("Failed to reset agent preset: %v", err)
+		}
+		al.clearPendingSkills(opts.Dispatch.SessionKey)
+		return true, true, "Agent preset reset to default."
+
+	case "run":
+		if len(parts) < 4 {
+			return true, true, "Usage: /preset run <name> <message>"
+		}
+		if err := applyAgentPresetToOptions(cfg, agent, opts, parts[2]); err != nil {
+			return true, true, err.Error()
+		}
+		message := commandTailAfterFields(raw, 3)
+		if message == "" {
+			return true, true, "Usage: /preset run <name> <message>"
+		}
+		opts.Dispatch.UserMessage = message
+		opts.UserMessage = message
+		return true, false, ""
+
+	default:
+		return true, true, "Usage: /preset [list|show <name>|use <name>|reset|run <name> <message>]"
+	}
+}
+
+func commandTailAfterFields(input string, count int) string {
+	rest := strings.TrimSpace(input)
+	for range count {
+		fields := strings.Fields(rest)
+		if len(fields) == 0 {
+			return ""
+		}
+		rest = strings.TrimSpace(rest[len(fields[0]):])
+	}
+	return rest
+}
+
+func formatAgentPreset(preset config.EffectiveAgentPreset) string {
+	model := "inherit"
+	if preset.Model != nil {
+		model = preset.Model.Primary
+		if len(preset.Model.Fallbacks) > 0 {
+			model += " (fallbacks: " + strings.Join(preset.Model.Fallbacks, ", ") + ")"
+		}
+	}
+	return fmt.Sprintf(
+		"Agent Preset: %s\nModel: %s\nTools: %s\nSkills: %s\nMCP: %s",
+		preset.Name,
+		model,
+		formatPresetList(preset.Tools, preset.ToolsSpecified),
+		formatPresetList(preset.Skills, preset.SkillsSpecified),
+		formatPresetList(preset.MCP, preset.MCPSpecified),
+	)
+}
+
+func formatPresetList(values []string, specified bool) string {
+	if !specified {
+		return "inherit"
+	}
+	if len(values) == 0 {
+		return "none"
+	}
+	return strings.Join(values, ", ")
 }
 
 func (al *AgentLoop) buildCommandsRuntime(
@@ -291,9 +454,20 @@ func (al *AgentLoop) buildCommandsRuntime(
 	}
 	if agent != nil {
 		if agent.ContextBuilder != nil {
-			rt.ListSkillNames = agent.ContextBuilder.ListSkillNames
+			rt.ListSkillNames = func() []string {
+				preset := config.EffectiveAgentPreset{}
+				if opts != nil {
+					preset = opts.AgentPreset
+				}
+				return agentPresetSkillNames(agent, preset)
+			}
 		}
 		rt.GetModelInfo = func() (string, string) {
+			if opts != nil && opts.AgentPreset.Enabled() && opts.AgentPreset.Model != nil {
+				candidates := agent.PresetCandidates[strings.ToLower(opts.AgentPreset.Name)]
+				return opts.AgentPreset.Model.Primary,
+					resolvedCandidateProvider(candidates, cfg.Agents.Defaults.Provider)
+			}
 			return agent.Model, resolvedCandidateProvider(agent.Candidates, cfg.Agents.Defaults.Provider)
 		}
 		rt.SwitchModel = func(value string) (string, error) {

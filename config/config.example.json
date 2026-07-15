@@ -21,6 +21,23 @@
       }
     }
   },
+  "agent_presets": {
+    "coding": {
+      "model": {
+        "primary": "claude-sonnet-4.6",
+        "fallbacks": ["gpt-5.4"]
+      },
+      "tools": ["read_file", "list_dir", "write_file", "edit_file", "exec"],
+      "skills": ["picoclaw-agent", "github"],
+      "mcp": []
+    },
+    "research": {
+      "model": "gpt-5.4",
+      "tools": ["web_search", "web_fetch", "read_file"],
+      "skills": ["summarize"],
+      "mcp": []
+    }
+  },
   "evolution": {
     "enabled": false,
     "mode": "observe",

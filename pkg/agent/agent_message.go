@@ -198,6 +198,10 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 	if err != nil {
 		return "", err
 	}
+	opts, err = al.resolveAgentPresetOptions(agent, opts)
+	if err != nil {
+		return err.Error() + " Please resend your message.", nil
+	}
 
 	// context-dependent commands check their own Runtime fields and report
 	// "unavailable" when the required capability is nil.

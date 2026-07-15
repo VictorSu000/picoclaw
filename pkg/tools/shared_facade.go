@@ -61,6 +61,10 @@ func WithToolSessionContext(
 	return toolshared.WithToolSessionContext(ctx, agentID, sessionKey, scope)
 }
 
+func WithAllowedMCPServers(ctx context.Context, servers []string, restricted bool) context.Context {
+	return toolshared.WithAllowedMCPServers(ctx, servers, restricted)
+}
+
 func ToolChannel(ctx context.Context) string {
 	return toolshared.ToolChannel(ctx)
 }
@@ -87,6 +91,10 @@ func ToolSessionKey(ctx context.Context) string {
 
 func ToolSessionScope(ctx context.Context) *session.SessionScope {
 	return toolshared.ToolSessionScope(ctx)
+}
+
+func ToolAllowedMCPServers(ctx context.Context) ([]string, bool) {
+	return toolshared.ToolAllowedMCPServers(ctx)
 }
 
 func ToolToSchema(tool Tool) map[string]any {

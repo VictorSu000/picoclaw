@@ -72,7 +72,8 @@ func (t *RegexSearchTool) Execute(ctx context.Context, args map[string]any) *Too
 
 	logger.DebugCF("discovery", "Regex search", map[string]any{"pattern": pattern})
 
-	res, err := t.registry.SearchRegex(pattern, t.maxSearchResults)
+	allowedServers, restricted := ToolAllowedMCPServers(ctx)
+	res, err := t.registry.searchRegex(pattern, t.maxSearchResults, allowedServers, restricted)
 	if err != nil {
 		logger.WarnCF("discovery", "Invalid regex pattern", map[string]any{"pattern": pattern, "error": err.Error()})
 		return ErrorResult(fmt.Sprintf("Invalid regex pattern syntax: %v. Please fix your regex and try again.", err))
@@ -136,7 +137,8 @@ func (t *BM25SearchTool) Execute(ctx context.Context, args map[string]any) *Tool
 
 	logger.DebugCF("discovery", "BM25 search", map[string]any{"query": query})
 
-	cached := t.getOrBuildEngine()
+	allowedServers, restricted := ToolAllowedMCPServers(ctx)
+	cached := t.getOrBuildEngineForMCPServers(allowedServers, restricted)
 	if cached == nil {
 		logger.DebugCF("discovery", "BM25 search: no hidden tools available", nil)
 		return SilentResult("No tools found matching the query.")
@@ -169,6 +171,15 @@ type ToolSearchResult struct {
 }
 
 func (r *ToolRegistry) SearchRegex(pattern string, maxSearchResults int) ([]ToolSearchResult, error) {
+	return r.searchRegex(pattern, maxSearchResults, nil, false)
+}
+
+func (r *ToolRegistry) searchRegex(
+	pattern string,
+	maxSearchResults int,
+	allowedServers []string,
+	restricted bool,
+) ([]ToolSearchResult, error) {
 	if maxSearchResults <= 0 {
 		return nil, nil
 	}
@@ -182,12 +193,22 @@ func (r *ToolRegistry) SearchRegex(pattern string, maxSearchResults int) ([]Tool
 	defer r.mu.RUnlock()
 
 	var results []ToolSearchResult
+	allowed := normalizedNameSet(allowedServers)
 
 	// Iterate in sorted order for deterministic results across calls.
 	for _, name := range r.sortedToolNames() {
 		entry := r.tools[name]
 		// Search only among the hidden tools (Core tools are already visible)
 		if !entry.IsCore {
+			if restricted {
+				serverName, ok := mcpServerName(entry.Tool)
+				if !ok {
+					continue
+				}
+				if _, ok := allowed[strings.ToLower(serverName)]; !ok {
+					continue
+				}
+			}
 			// Directly call interface methods! No reflection/unmarshalling needed.
 			desc := entry.Tool.Description()
 
@@ -265,6 +286,21 @@ func buildBM25Engine(docs []searchDoc) *utils.BM25Engine[searchDoc] {
 // getOrBuildEngine returns a cached BM25 engine, rebuilding it only when
 // the registry version has changed (new tools registered).
 func (t *BM25SearchTool) getOrBuildEngine() *bm25CachedEngine {
+	return t.getOrBuildEngineForMCPServers(nil, false)
+}
+
+func (t *BM25SearchTool) getOrBuildEngineForMCPServers(
+	allowedServers []string,
+	restricted bool,
+) *bm25CachedEngine {
+	if restricted {
+		snap := t.registry.SnapshotHiddenToolsForMCPServers(allowedServers, true)
+		docs := snapshotToSearchDocs(snap)
+		if len(docs) == 0 {
+			return nil
+		}
+		return &bm25CachedEngine{engine: buildBM25Engine(docs)}
+	}
 	// Fast path: optimistic check without locking.
 	if t.cachedEngine != nil && t.cacheVersion == t.registry.Version() {
 		return t.cachedEngine

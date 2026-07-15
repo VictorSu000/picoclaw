@@ -13,11 +13,12 @@ import (
 )
 
 type Session struct {
-	Key      string              `json:"key"`
-	Messages []providers.Message `json:"messages"`
-	Summary  string              `json:"summary,omitempty"`
-	Created  time.Time           `json:"created"`
-	Updated  time.Time           `json:"updated"`
+	Key         string              `json:"key"`
+	AgentPreset string              `json:"agent_preset,omitempty"`
+	Messages    []providers.Message `json:"messages"`
+	Summary     string              `json:"summary,omitempty"`
+	Created     time.Time           `json:"created"`
+	Updated     time.Time           `json:"updated"`
 }
 
 type SessionManager struct {
@@ -213,10 +214,11 @@ func (sm *SessionManager) Save(key string) error {
 	}
 
 	snapshot := Session{
-		Key:     stored.Key,
-		Summary: stored.Summary,
-		Created: stored.Created,
-		Updated: stored.Updated,
+		Key:         stored.Key,
+		AgentPreset: stored.AgentPreset,
+		Summary:     stored.Summary,
+		Created:     stored.Created,
+		Updated:     stored.Updated,
 	}
 	if len(stored.Messages) > 0 {
 		snapshot.Messages = messageutil.FilterInvalidHistoryMessages(stored.Messages)
@@ -265,6 +267,35 @@ func (sm *SessionManager) Save(key string) error {
 	}
 	cleanup = false
 	return nil
+}
+
+func (sm *SessionManager) GetAgentPreset(sessionKey string) string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	session, ok := sm.sessions[sessionKey]
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(session.AgentPreset)
+}
+
+func (sm *SessionManager) SetAgentPreset(sessionKey, preset string) error {
+	sm.mu.Lock()
+	session, ok := sm.sessions[sessionKey]
+	if !ok {
+		now := time.Now()
+		session = &Session{
+			Key:      sessionKey,
+			Messages: []providers.Message{},
+			Created:  now,
+			Updated:  now,
+		}
+		sm.sessions[sessionKey] = session
+	}
+	session.AgentPreset = strings.TrimSpace(preset)
+	session.Updated = time.Now()
+	sm.mu.Unlock()
+	return sm.Save(sessionKey)
 }
 
 func (sm *SessionManager) loadSessions() error {

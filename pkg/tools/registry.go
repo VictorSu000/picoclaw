@@ -226,6 +226,70 @@ func (r *ToolRegistry) SnapshotHiddenTools() HiddenToolSnapshot {
 	}
 }
 
+func mcpServerName(tool Tool) (string, bool) {
+	provider, ok := tool.(interface{ MCPServerName() string })
+	if !ok {
+		return "", false
+	}
+	name := strings.TrimSpace(provider.MCPServerName())
+	return name, name != ""
+}
+
+func (r *ToolRegistry) MCPServerForTool(name string) (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	entry, ok := r.tools[name]
+	if !ok {
+		return "", false
+	}
+	return mcpServerName(entry.Tool)
+}
+
+func (r *ToolRegistry) SnapshotHiddenToolsForMCPServers(
+	servers []string,
+	restricted bool,
+) HiddenToolSnapshot {
+	if !restricted {
+		return r.SnapshotHiddenTools()
+	}
+	allowed := normalizedNameSet(servers)
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	docs := make([]HiddenToolDoc, 0)
+	for name, entry := range r.tools {
+		if entry.IsCore {
+			continue
+		}
+		serverName, ok := mcpServerName(entry.Tool)
+		if !ok {
+			continue
+		}
+		if _, ok := allowed[strings.ToLower(serverName)]; !ok {
+			continue
+		}
+		docs = append(docs, HiddenToolDoc{
+			Name:        name,
+			Description: entry.Tool.Description(),
+		})
+	}
+	sort.Slice(docs, func(i, j int) bool { return docs[i].Name < docs[j].Name })
+	return HiddenToolSnapshot{Docs: docs, Version: r.version.Load()}
+}
+
+func normalizedNameSet(values []string) map[string]struct{} {
+	if len(values) == 0 {
+		return nil
+	}
+	set := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value != "" {
+			set[value] = struct{}{}
+		}
+	}
+	return set
+}
+
 func (r *ToolRegistry) Get(name string) (Tool, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

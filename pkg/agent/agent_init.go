@@ -39,6 +39,9 @@ func NewAgentLoop(
 		if agent, ok := registry.GetAgent(agentID); ok {
 			rl.RegisterCandidates(agent.Candidates)
 			rl.RegisterCandidates(agent.LightCandidates)
+			for _, candidates := range agent.PresetCandidates {
+				rl.RegisterCandidates(candidates)
+			}
 		}
 	}
 	fallbackChain := providers.NewFallbackChain(cooldown, rl)

@@ -486,8 +486,14 @@ func activeSkillNames(agent *AgentInstance, opts processOptions) []string {
 		return nil
 	}
 
-	combined := make([]string, 0, len(agent.SkillsFilter)+len(opts.ForcedSkills))
-	combined = append(combined, agent.SkillsFilter...)
+	baseSkills := agent.SkillsFilter
+	if opts.AgentPreset.Enabled() && opts.AgentPreset.SkillsSpecified {
+		// Preset skills are a catalog/activation allowlist. They are not
+		// automatically injected as full SKILL.md content.
+		baseSkills = nil
+	}
+	combined := make([]string, 0, len(baseSkills)+len(opts.ForcedSkills))
+	combined = append(combined, baseSkills...)
 	combined = append(combined, opts.ForcedSkills...)
 	if len(combined) == 0 {
 		return nil
@@ -514,7 +520,10 @@ func activeSkillNames(agent *AgentInstance, opts processOptions) []string {
 	}
 
 	if turnProfileCustomSkills(opts.TurnProfile) {
-		return filterNamesByTurnProfile(resolved, opts.TurnProfile.AllowedSkills)
+		resolved = filterNamesByTurnProfile(resolved, opts.TurnProfile.AllowedSkills)
+	}
+	if opts.AgentPreset.Enabled() && opts.AgentPreset.SkillsSpecified {
+		resolved = filterNamesByTurnProfile(resolved, opts.AgentPreset.Skills)
 	}
 	return resolved
 }
@@ -676,7 +685,10 @@ func buildUseCommandHelp(agent *AgentInstance) string {
 		return "Usage: /use <skill> [message]"
 	}
 
-	names := agent.ContextBuilder.ListSkillNames()
+	return buildUseCommandHelpForNames(agent.ContextBuilder.ListSkillNames())
+}
+
+func buildUseCommandHelpForNames(names []string) string {
 	if len(names) == 0 {
 		return "Usage: /use <skill> [message]\nNo installed skills found."
 	}

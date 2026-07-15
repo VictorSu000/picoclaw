@@ -185,6 +185,7 @@ type turnState struct {
 	agent   *AgentInstance
 	opts    processOptions
 	profile config.EffectiveTurnProfile
+	preset  config.EffectiveAgentPreset
 	scope   turnEventScope
 
 	turnID            string
@@ -258,6 +259,7 @@ func newTurnState(agent *AgentInstance, opts processOptions, scope turnEventScop
 		agent:        agent,
 		opts:         opts,
 		profile:      opts.TurnProfile,
+		preset:       opts.AgentPreset,
 		scope:        scope,
 		turnID:       scope.turnID,
 		agentID:      agent.ID,

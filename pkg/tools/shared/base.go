@@ -50,7 +50,13 @@ var (
 	ctxKeyAgentID          = &toolCtxKey{"agentID"}
 	ctxKeySessionKey       = &toolCtxKey{"sessionKey"}
 	ctxKeySessionScope     = &toolCtxKey{"sessionScope"}
+	ctxKeyAllowedMCP       = &toolCtxKey{"allowedMCP"}
 )
+
+type AllowedMCPServers struct {
+	Restricted bool
+	Servers    []string
+}
 
 // WithToolContext returns a child context carrying channel and chatID.
 func WithToolContext(ctx context.Context, channel, chatID string) context.Context {
@@ -86,6 +92,14 @@ func WithToolSessionContext(
 	ctx = context.WithValue(ctx, ctxKeySessionKey, sessionKey)
 	ctx = context.WithValue(ctx, ctxKeySessionScope, session.CloneScope(scope))
 	return ctx
+}
+
+func WithAllowedMCPServers(ctx context.Context, servers []string, restricted bool) context.Context {
+	value := AllowedMCPServers{Restricted: restricted}
+	if len(servers) > 0 {
+		value.Servers = append([]string(nil), servers...)
+	}
+	return context.WithValue(ctx, ctxKeyAllowedMCP, value)
 }
 
 // ToolChannel extracts the channel from ctx, or "" if unset.
@@ -149,6 +163,14 @@ func ToolSessionScope(ctx context.Context) *session.SessionScope {
 		return nil
 	}
 	return session.CloneScope(scope)
+}
+
+func ToolAllowedMCPServers(ctx context.Context) (servers []string, restricted bool) {
+	value, ok := ctx.Value(ctxKeyAllowedMCP).(AllowedMCPServers)
+	if !ok {
+		return nil, false
+	}
+	return append([]string(nil), value.Servers...), value.Restricted
 }
 
 // AsyncCallback is a function type that async tools use to notify completion.

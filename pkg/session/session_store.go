@@ -45,3 +45,10 @@ type ArchivingSessionStore interface {
 	// chronological order. Fire-and-forget: implementations log failures.
 	ArchiveMessages(sessionKey string, msgs []providers.Message)
 }
+
+// AgentPresetSessionStore is the optional persistence capability used by the
+// agent loop to remember the selected preset for one session.
+type AgentPresetSessionStore interface {
+	GetAgentPreset(sessionKey string) string
+	SetAgentPreset(sessionKey, preset string) error
+}

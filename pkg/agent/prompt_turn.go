@@ -28,34 +28,45 @@ func promptBuildRequestForTurn(
 		ActiveSkills:      activeSkillNames(ts.agent, ts.opts),
 		Overlays:          promptOverlaysForOptions(ts.opts),
 	}
-	hasCallableTools := true
-	if ts.profile.Enabled {
-		hasCallableTools = turnProfileHasCallableTools(ts.profile, ts.agent.Tools.ToProviderDefs()) ||
-			turnProfileNativeSearchCallable(cfg, ts.profile, ts.agent)
+	hasCallableTools := len(filterToolsForTurn(
+		ts.agent,
+		ts.agent.Tools.ToProviderDefs(),
+		ts.profile,
+		ts.preset,
+	)) > 0 || turnNativeSearchCallable(cfg, ts.profile, ts.preset, ts.agent)
+	if ts.profile.Enabled || ts.preset.Enabled() {
+		if !hasCallableTools {
+			req.SuppressToolUseRule = true
+		}
 	}
 	if turnProfileSystemPromptOff(ts.profile) {
 		req.SuppressDefaultSystemPrompt = true
 		req.SuppressSkillContext = true
 		req.ToolUseFallback = hasCallableTools
 	}
-	if ts.profile.Enabled && !hasCallableTools {
-		req.SuppressToolUseRule = true
+	if allowedSkills, restricted := allowedSkillsForTurn(ts.profile, ts.preset); restricted {
+		if len(allowedSkills) == 0 {
+			req.SuppressSkillContext = true
+		} else {
+			req.AllowedSkills = allowedSkills
+		}
 	}
-	if turnProfileSkillsOff(ts.profile) {
-		req.SuppressSkillContext = true
+	if allowedTools, restricted := allowedToolNamesForTurn(ts.agent, ts.profile, ts.preset); restricted {
+		if len(allowedTools) == 0 {
+			req.SuppressToolUseRule = true
+		} else {
+			req.AllowedTools = allowedTools
+		}
 	}
-	if turnProfileCustomSkills(ts.profile) {
-		req.AllowedSkills = append([]string(nil), ts.profile.AllowedSkills...)
-	}
-	if ts.profile.Enabled && ts.profile.ToolsMode == config.TurnProfileModeCustom {
-		req.AllowedTools = append([]string(nil), ts.profile.AllowedTools...)
-	}
+	req.RestrictMCPServers = ts.preset.Enabled() && ts.preset.MCPSpecified
+	req.AllowedMCPServers = append([]string(nil), ts.preset.MCP...)
 	return req
 }
 
-func turnProfileNativeSearchCallable(
+func turnNativeSearchCallable(
 	cfg *config.Config,
-	profile config.EffectiveTurnProfile,
+	turnPolicy config.EffectiveTurnProfile,
+	preset config.EffectiveAgentPreset,
 	agent *AgentInstance,
 ) bool {
 	if cfg == nil || agent == nil {
@@ -64,11 +75,25 @@ func turnProfileNativeSearchCallable(
 	if !cfg.Tools.IsToolEnabled("web") || !cfg.Tools.Web.PreferNative {
 		return false
 	}
-	if !turnProfileToolAllowed(profile, "web_search") {
+	if !toolAllowedForTurn(agent, turnPolicy, preset, "web_search") {
 		return false
 	}
-	nativeProvider, ok := agent.Provider.(providers.NativeSearchCapable)
-	return ok && nativeProvider.SupportsNativeSearch()
+	nativeProvider := agent.Provider
+	if preset.Enabled() && preset.Model != nil {
+		if candidates := agent.PresetCandidates[strings.ToLower(preset.Name)]; len(candidates) > 0 {
+			if provider, err := providerForFallbackCandidate(
+				agent,
+				agent.Provider,
+				candidates,
+				candidates[0].Provider,
+				candidates[0].Model,
+			); err == nil && provider != nil {
+				nativeProvider = provider
+			}
+		}
+	}
+	nativeSearchProvider, ok := nativeProvider.(providers.NativeSearchCapable)
+	return ok && nativeSearchProvider.SupportsNativeSearch()
 }
 
 func promptBuildRequestForProcessOptions(
@@ -91,28 +116,36 @@ func promptBuildRequestForProcessOptions(
 		ActiveSkills:      activeSkillNames(agent, opts),
 		Overlays:          promptOverlaysForOptions(opts),
 	}
-	profile := opts.TurnProfile
+	turnPolicy := opts.TurnProfile
+	preset := opts.AgentPreset
 	hasCallableTools := true
-	if profile.Enabled && agent != nil {
-		hasCallableTools = turnProfileHasCallableTools(profile, agent.Tools.ToProviderDefs())
+	if agent != nil {
+		hasCallableTools = len(filterToolsForTurn(agent, agent.Tools.ToProviderDefs(), turnPolicy, preset)) > 0
 	}
-	if turnProfileSystemPromptOff(profile) {
+	if turnProfileSystemPromptOff(turnPolicy) {
 		req.SuppressDefaultSystemPrompt = true
 		req.SuppressSkillContext = true
 		req.ToolUseFallback = hasCallableTools
 	}
-	if profile.Enabled && !hasCallableTools {
+	if (turnPolicy.Enabled || preset.Enabled()) && !hasCallableTools {
 		req.SuppressToolUseRule = true
 	}
-	if turnProfileSkillsOff(profile) {
-		req.SuppressSkillContext = true
+	if allowedSkills, restricted := allowedSkillsForTurn(turnPolicy, preset); restricted {
+		if len(allowedSkills) == 0 {
+			req.SuppressSkillContext = true
+		} else {
+			req.AllowedSkills = allowedSkills
+		}
 	}
-	if turnProfileCustomSkills(profile) {
-		req.AllowedSkills = append([]string(nil), profile.AllowedSkills...)
+	if allowedTools, restricted := allowedToolNamesForTurn(agent, turnPolicy, preset); restricted {
+		if len(allowedTools) == 0 {
+			req.SuppressToolUseRule = true
+		} else {
+			req.AllowedTools = allowedTools
+		}
 	}
-	if profile.Enabled && profile.ToolsMode == config.TurnProfileModeCustom {
-		req.AllowedTools = append([]string(nil), profile.AllowedTools...)
-	}
+	req.RestrictMCPServers = preset.Enabled() && preset.MCPSpecified
+	req.AllowedMCPServers = append([]string(nil), preset.MCP...)
 	return req
 }
 

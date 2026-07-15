@@ -67,6 +67,12 @@ func (t *MCPTool) SetWorkspace(workspace string) {
 	t.workspace = strings.TrimSpace(workspace)
 }
 
+// MCPServerName identifies the server that owns this dynamically registered
+// tool. Agent presets use this metadata instead of parsing sanitized tool names.
+func (t *MCPTool) MCPServerName() string {
+	return strings.TrimSpace(t.serverName)
+}
+
 func (t *MCPTool) SetMaxInlineTextRunes(limit int) {
 	if limit > 0 {
 		t.maxInlineTextRunes = limit

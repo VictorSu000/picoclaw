@@ -379,6 +379,8 @@ func spawnSubTurn(
 		SenderID:                parentTS.opts.Dispatch.SenderID(),
 		SenderDisplayName:       parentTS.opts.SenderDisplayName,
 		TurnProfile:             parentTS.profile,
+		AgentPreset:             parentTS.preset,
+		AgentPresetResolved:     true,
 		SystemPromptOverride:    cfg.ActualSystemPrompt,
 		InitialSteeringMessages: cfg.InitialMessages,
 		DefaultResponse:         "",

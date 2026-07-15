@@ -132,11 +132,11 @@ toolLoop:
 		toolName := tc.Name
 		toolArgs := cloneStringAnyMap(tc.Arguments)
 		denyByTurnProfile := func() bool {
-			if turnProfileToolAllowed(ts.profile, toolName) {
+			if toolAllowedForTurn(ts.agent, ts.profile, ts.preset, toolName) {
 				return false
 			}
 			exec.allResponsesHandled = false
-			denyContent := fmt.Sprintf("Tool %q is not allowed by the active turn profile.", toolName)
+			denyContent := fmt.Sprintf("Tool %q is not allowed by the active turn policy or agent preset.", toolName)
 			al.emitEvent(
 				runtimeevents.KindAgentToolExecSkipped,
 				ts.eventMeta("runTurn", "turn.tool.skipped"),
@@ -566,6 +566,11 @@ toolLoop:
 			ts.agent.ID,
 			ts.sessionKey,
 			ts.opts.Dispatch.SessionScope,
+		)
+		execCtx = tools.WithAllowedMCPServers(
+			execCtx,
+			ts.preset.MCP,
+			ts.preset.Enabled() && ts.preset.MCPSpecified,
 		)
 		toolResult := ts.agent.Tools.ExecuteWithContext(
 			execCtx,

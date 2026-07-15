@@ -47,7 +47,7 @@ func (p *Pipeline) SetupTurn(ctx context.Context, ts *turnState) (*turnExecution
 	messages = resolveMediaRefs(messages, p.MediaStore, maxMediaSize, currentTurnStart)
 
 	if !ts.opts.NoHistory {
-		toolDefs := filterToolsByTurnProfile(ts.agent.Tools.ToProviderDefs(), ts.profile)
+		toolDefs := filterToolsForTurn(ts.agent, ts.agent.Tools.ToProviderDefs(), ts.profile, ts.preset)
 		if isOverContextBudget(ts.agent.ContextWindow, messages, toolDefs, ts.agent.MaxTokens) {
 			logger.WarnCF("agent", "Proactive compression: context budget exceeded before LLM call",
 				map[string]any{"session_key": ts.sessionKey})
@@ -135,6 +135,28 @@ func (p *Pipeline) SetupTurn(ctx context.Context, ts *turnState) (*turnExecution
 	activeModelName := strings.TrimSpace(ts.agent.Model)
 	if usedLight {
 		activeModelName = strings.TrimSpace(sideQuestionModelName(ts.agent, true))
+	}
+	if ts.preset.Enabled() && ts.preset.Model != nil {
+		activeCandidates = append(
+			[]providers.FallbackCandidate(nil),
+			ts.agent.PresetCandidates[strings.ToLower(ts.preset.Name)]...,
+		)
+		activeModel = resolvedCandidateModel(activeCandidates, ts.preset.Model.Primary)
+		activeModelName = strings.TrimSpace(ts.preset.Model.Primary)
+		usedLight = false
+		if len(activeCandidates) > 0 {
+			if provider, providerErr := providerForFallbackCandidate(
+				ts.agent,
+				ts.agent.Provider,
+				activeCandidates,
+				activeCandidates[0].Provider,
+				activeCandidates[0].Model,
+			); providerErr != nil {
+				return nil, providerErr
+			} else if provider != nil {
+				activeProvider = provider
+			}
+		}
 	}
 	activeModelName = resolvedCandidateModelName(activeCandidates, activeModelName)
 

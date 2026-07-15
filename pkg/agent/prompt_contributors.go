@@ -81,6 +81,12 @@ func (c mcpServerPromptContributor) ContributePrompt(
 	if serverName == "" || c.toolCount <= 0 {
 		return nil, nil
 	}
+	if req.RestrictMCPServers {
+		allowed := cleanAllowedSet(req.AllowedMCPServers)
+		if _, ok := allowed[strings.ToLower(serverName)]; !ok {
+			return nil, nil
+		}
+	}
 	if len(req.AllowedTools) > 0 &&
 		!promptAllowsToolPrefix(req, "mcp_"+promptSourceComponent(serverName)+"_") {
 		return nil, nil

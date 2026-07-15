@@ -141,6 +141,53 @@ PicoClaw 将数据存储在您配置的工作区中（默认：`~/.picoclaw/work
 }
 ```
 
+### Agent Preset
+
+`agent_presets` 用于定义应用在当前路由 Agent 之上的命名请求预设。Preset 不会改变 Agent 路由、workspace、身份、memory 或 session 历史。不配置该字段时，PicoClaw 的行为与当前版本完全一致。
+
+```json
+{
+  "agent_presets": {
+    "coding": {
+      "model": {
+        "primary": "claude-sonnet-4.6",
+        "fallbacks": ["gpt-5.4"]
+      },
+      "tools": ["read_file", "write_file", "edit_file", "exec"],
+      "skills": ["go-development", "code-review"],
+      "mcp": ["github"]
+    },
+    "research": {
+      "model": "gpt-5.4",
+      "tools": ["web_search", "web_fetch", "read_file"],
+      "skills": ["research"],
+      "mcp": ["context7"]
+    }
+  }
+}
+```
+
+所有字段都是可选的。字段省略表示继承当前 Agent 的行为；显式配置空数组表示在该 preset 中禁用这类能力。`model` 可以是模型名称，也可以使用现有的 `{ "primary", "fallbacks" }` 格式。
+
+- `tools` 填写普通 PicoClaw 工具名，不能启用全局已禁用的工具，也不能绕过 `AGENT.md` 工具白名单。
+- `skills` 限制 skill 摘要目录以及 `/use` 可以激活的 skill。普通请求只注入摘要；只有显式使用 `/use` 后才加载 `SKILL.md` 正文。
+- `mcp` 填写 `tools.mcp.servers` 中的 MCP server 名称，同时限制 server 提示、原生 MCP 工具、deferred 搜索结果和实际执行；它不能启动全局已禁用的 server。
+
+如果 preset 引用了当前路由 Agent 不可用的 model、tool、skill 或 MCP server，切换时会返回明确错误。使用前需要先在公共配置中配置并启用这些依赖。
+
+对话指令：
+
+```text
+/preset
+/preset list
+/preset show coding
+/preset use coding
+/preset reset
+/preset run research 调研这个主题
+```
+
+`/preset use` 对当前 session 持续生效，`/preset run` 只影响当前回答。`default` 保留为“不使用 preset”的行为，不能在 `agent_presets` 中定义。
+
 ### Web 启动器控制台
 
 用 **picoclaw-launcher** 打开浏览器控制台前需要先使用密码登录。首次启动时打开 `/launcher-setup` 创建 dashboard 登录密码；后续手动登录使用 `/launcher-login`。

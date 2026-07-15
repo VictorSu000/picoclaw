@@ -143,6 +143,53 @@ Example clean web policy:
 }
 ```
 
+### Agent Presets
+
+`agent_presets` defines named request-time overrides applied on top of the routed agent. Presets do not change agent routing, workspace, identity, memory, or session history. If the field is omitted, PicoClaw behaves exactly as before.
+
+```json
+{
+  "agent_presets": {
+    "coding": {
+      "model": {
+        "primary": "claude-sonnet-4.6",
+        "fallbacks": ["gpt-5.4"]
+      },
+      "tools": ["read_file", "write_file", "edit_file", "exec"],
+      "skills": ["go-development", "code-review"],
+      "mcp": ["github"]
+    },
+    "research": {
+      "model": "gpt-5.4",
+      "tools": ["web_search", "web_fetch", "read_file"],
+      "skills": ["research"],
+      "mcp": ["context7"]
+    }
+  }
+}
+```
+
+All fields are optional. An omitted field inherits the routed agent's behavior, while an explicit empty list disables that capability for the preset. `model` accepts either a model name or the existing `{ "primary", "fallbacks" }` form.
+
+- `tools` contains ordinary registered PicoClaw tool names. It cannot enable a globally disabled tool or bypass an `AGENT.md` tool allowlist.
+- `skills` limits the skill catalog and the skills that `/use` may activate. It includes summaries only; `SKILL.md` content is loaded only after explicit activation with `/use`.
+- `mcp` contains MCP server names from `tools.mcp.servers`. It filters server prompts, native MCP tools, deferred discovery results, and execution. It does not start a disabled server.
+
+Preset selection is rejected with a clear error if it references a model, tool, skill, or MCP server that is unavailable to the routed agent. Configure and enable those dependencies globally before selecting the preset.
+
+Use presets in a conversation with:
+
+```text
+/preset
+/preset list
+/preset show coding
+/preset use coding
+/preset reset
+/preset run research Research this topic
+```
+
+`/preset use` persists for the current session. `/preset run` affects only that answer. `default` is reserved as the no-preset behavior and cannot be defined under `agent_presets`.
+
 ### Web launcher dashboard
 
 **picoclaw-launcher** serves a browser UI that requires password sign-in first. On first run, open `/launcher-setup` to create the dashboard password. Later manual sign-ins use `/launcher-login`.

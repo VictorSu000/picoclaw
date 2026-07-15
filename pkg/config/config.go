@@ -37,17 +37,20 @@ type Config struct {
 	Version   int             `json:"version"             yaml:"-"`
 	Isolation IsolationConfig `json:"isolation,omitempty" yaml:"-"`
 	Agents    AgentsConfig    `json:"agents"              yaml:"-"`
-	Session   SessionConfig   `json:"session,omitempty"   yaml:"-"`
-	Evolution EvolutionConfig `json:"evolution,omitempty" yaml:"-"`
-	Channels  ChannelsConfig  `json:"channel_list"        yaml:"channel_list"`
-	ModelList SecureModelList `json:"model_list"          yaml:"model_list"` // New model-centric provider configuration
-	Gateway   GatewayConfig   `json:"gateway"             yaml:"-"`
-	Events    EventsConfig    `json:"events,omitempty"    yaml:"-"`
-	Hooks     HooksConfig     `json:"hooks,omitempty"     yaml:"-"`
-	Tools     ToolsConfig     `json:"tools"               yaml:",inline"`
-	Heartbeat HeartbeatConfig `json:"heartbeat"           yaml:"-"`
-	Devices   DevicesConfig   `json:"devices"             yaml:"-"`
-	Voice     VoiceConfig     `json:"voice"               yaml:"-"`
+	// AgentPresets are named request-time overrides applied on top of the
+	// routed agent without changing its workspace, identity, or session.
+	AgentPresets map[string]AgentPresetConfig `json:"agent_presets,omitempty" yaml:"-"`
+	Session      SessionConfig                `json:"session,omitempty"   yaml:"-"`
+	Evolution    EvolutionConfig              `json:"evolution,omitempty" yaml:"-"`
+	Channels     ChannelsConfig               `json:"channel_list"        yaml:"channel_list"`
+	ModelList    SecureModelList              `json:"model_list"          yaml:"model_list"` // New model-centric provider configuration
+	Gateway      GatewayConfig                `json:"gateway"             yaml:"-"`
+	Events       EventsConfig                 `json:"events,omitempty"    yaml:"-"`
+	Hooks        HooksConfig                  `json:"hooks,omitempty"     yaml:"-"`
+	Tools        ToolsConfig                  `json:"tools"               yaml:",inline"`
+	Heartbeat    HeartbeatConfig              `json:"heartbeat"           yaml:"-"`
+	Devices      DevicesConfig                `json:"devices"             yaml:"-"`
+	Voice        VoiceConfig                  `json:"voice"               yaml:"-"`
 	// BuildInfo contains build-time version information
 	BuildInfo BuildInfo `json:"build_info,omitempty" yaml:"-"`
 
@@ -1511,6 +1514,9 @@ func LoadConfig(path string) (*Config, error) {
 
 	// Validate model_list for uniqueness and required fields
 	if err = cfg.ValidateModelList(); err != nil {
+		return nil, err
+	}
+	if err = cfg.ValidateAgentPresets(); err != nil {
 		return nil, err
 	}
 

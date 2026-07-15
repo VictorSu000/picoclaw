@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"strings"
 
@@ -21,6 +22,11 @@ type metaAwareStore interface {
 	GetSessionMeta(ctx context.Context, sessionKey string) (memory.SessionMeta, error)
 	UpsertSessionMeta(ctx context.Context, sessionKey string, scope json.RawMessage, aliases []string) error
 	ResolveSessionKey(ctx context.Context, sessionKey string) (string, bool, error)
+}
+
+type agentPresetMetaStore interface {
+	GetSessionMeta(ctx context.Context, sessionKey string) (memory.SessionMeta, error)
+	SetSessionAgentPreset(ctx context.Context, sessionKey, preset string) error
 }
 
 type aliasPromotingStore interface {
@@ -122,6 +128,29 @@ func (b *JSONLBackend) GetSessionScope(sessionKey string) *SessionScope {
 		return nil
 	}
 	return CloneScope(&scope)
+}
+
+func (b *JSONLBackend) GetAgentPreset(sessionKey string) string {
+	store, ok := b.store.(agentPresetMetaStore)
+	if !ok {
+		return ""
+	}
+	sessionKey = b.resolveSessionKey(sessionKey)
+	meta, err := store.GetSessionMeta(context.Background(), sessionKey)
+	if err != nil {
+		log.Printf("session: get agent preset: %v", err)
+		return ""
+	}
+	return strings.TrimSpace(meta.AgentPreset)
+}
+
+func (b *JSONLBackend) SetAgentPreset(sessionKey, preset string) error {
+	store, ok := b.store.(agentPresetMetaStore)
+	if !ok {
+		return fmt.Errorf("session metadata store does not support agent presets")
+	}
+	sessionKey = b.resolveSessionKey(sessionKey)
+	return store.SetSessionAgentPreset(context.Background(), sessionKey, strings.TrimSpace(preset))
 }
 
 func (b *JSONLBackend) AddMessage(sessionKey, role, content string) {
