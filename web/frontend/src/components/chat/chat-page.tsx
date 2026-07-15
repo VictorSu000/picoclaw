@@ -17,6 +17,7 @@ import {
 } from "@/components/chat/chat-composer"
 import { ChatEmptyState } from "@/components/chat/chat-empty-state"
 import { ModelSelector } from "@/components/chat/model-selector"
+import { PresetSelector } from "@/components/chat/preset-selector"
 import { SessionHistoryMenu } from "@/components/chat/session-history-menu"
 import { TypingIndicator } from "@/components/chat/typing-indicator"
 import { UserMessage } from "@/components/chat/user-message"
@@ -40,6 +41,7 @@ import {
   getTransferredFiles,
   hasFileTransfer,
 } from "@/features/chat/image-input"
+import { useAgentPresets } from "@/hooks/use-agent-presets"
 import { useChatModels } from "@/hooks/use-chat-models"
 import { useGateway } from "@/hooks/use-gateway"
 import { usePicoChat } from "@/hooks/use-pico-chat"
@@ -200,6 +202,8 @@ export function ChatPage() {
     contextUsage,
     sessionSummary,
     archivedMessageCount,
+    agentPresetName,
+    effectiveModelName: storedEffectiveModelName,
     sendMessage,
     switchSession,
     newChat,
@@ -217,7 +221,23 @@ export function ChatPage() {
     localModels,
     handleSetDefault,
   } = useChatModels({ isConnected: isGatewayRunning })
-  const hasDefaultModel = Boolean(defaultModelName)
+  const {
+    presets,
+    isLoading: presetsLoading,
+    isChanging: presetChanging,
+    isPresetActive,
+    effectiveModelName,
+    fallbacks: presetFallbacks,
+    changePreset,
+  } = useAgentPresets({
+    activeSessionId,
+    agentPresetName,
+    storedEffectiveModelName,
+  })
+  const selectedModelName = isPresetActive
+    ? effectiveModelName
+    : defaultModelName
+  const hasDefaultModel = Boolean(selectedModelName)
   const inputDisabledReason = resolveChatInputDisabledReason({
     hasDefaultModel,
     connectionState,
@@ -397,17 +417,43 @@ export function ChatPage() {
     <div className="bg-background/95 flex h-full flex-col">
       <PageHeader
         title={t("navigation.chat")}
-        className={`transition-shadow ${hasScrolled ? "shadow-xs" : "shadow-none"
-          }`}
+        className={`transition-shadow ${hasScrolled ? "shadow-xs" : "shadow-none"}`}
         titleExtra={
-          hasAvailableModels && (
-            <ModelSelector
-              defaultModelName={defaultModelName}
-              apiKeyModels={apiKeyModels}
-              oauthModels={oauthModels}
-              localModels={localModels}
-              onValueChange={handleSetDefault}
-            />
+          (hasAvailableModels || presets.length > 0 || isPresetActive) && (
+            <div className="flex min-w-0 items-center gap-1">
+              <ModelSelector
+                defaultModelName={defaultModelName}
+                displayModelName={
+                  isPresetActive ? effectiveModelName : undefined
+                }
+                disabled={isPresetActive}
+                disabledReason={
+                  isPresetActive
+                    ? `${t("chat.modelControlledByPreset", {
+                        name: agentPresetName,
+                      })}${
+                        presetFallbacks.length > 0
+                          ? ` ${t("chat.presetFallbacks", {
+                              models: presetFallbacks.join(", "),
+                            })}`
+                          : ""
+                      }`
+                    : undefined
+                }
+                apiKeyModels={apiKeyModels}
+                oauthModels={oauthModels}
+                localModels={localModels}
+                onValueChange={handleSetDefault}
+              />
+              {(presets.length > 0 || isPresetActive || presetsLoading) && (
+                <PresetSelector
+                  value={agentPresetName}
+                  presets={presets}
+                  disabled={isTyping || presetChanging || presetsLoading}
+                  onValueChange={(value) => void changePreset(value)}
+                />
+              )}
+            </div>
           )
         }
       >
@@ -476,7 +522,7 @@ export function ChatPage() {
           {messages.length === 0 && !isTyping && (
             <ChatEmptyState
               hasAvailableModels={hasAvailableModels}
-              defaultModelName={defaultModelName}
+              defaultModelName={selectedModelName}
               isConnected={isGatewayRunning}
             />
           )}

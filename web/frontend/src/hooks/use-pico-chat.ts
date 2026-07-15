@@ -64,6 +64,8 @@ export function usePicoChat() {
     contextUsage,
     sessionSummary,
     archivedMessageCount,
+    agentPresetName,
+    effectiveModelName,
   } = useAtomValue(chatAtom)
 
   return {
@@ -74,6 +76,8 @@ export function usePicoChat() {
     contextUsage,
     sessionSummary,
     archivedMessageCount,
+    agentPresetName,
+    effectiveModelName,
     sendMessage: sendChatMessage,
     switchSession: switchChatSession,
     newChat: newChatSession,

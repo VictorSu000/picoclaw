@@ -268,33 +268,45 @@ export async function hydrateActiveSession() {
   }
 
   hydratePromise = loadSessionMessages(storedSessionId)
-    .then(({ messages: historyMessages, summary, archivedCount }) => {
-      const currentState = getChatState()
-      if (currentState.activeSessionId !== storedSessionId) {
-        return
-      }
+    .then(
+      ({
+        messages: historyMessages,
+        summary,
+        archivedCount,
+        agentPresetName,
+        effectiveModelName,
+      }) => {
+        const currentState = getChatState()
+        if (currentState.activeSessionId !== storedSessionId) {
+          return
+        }
 
-      if (currentState.messages.length > 0) {
+        if (currentState.messages.length > 0) {
+          updateChatStore({
+            messages: mergeHistoryMessages(
+              historyMessages,
+              currentState.messages,
+            ),
+            hasHydratedActiveSession: true,
+            sessionSummary: summary,
+            archivedMessageCount: archivedCount,
+            agentPresetName,
+            effectiveModelName,
+          })
+          return
+        }
+
         updateChatStore({
-          messages: mergeHistoryMessages(
-            historyMessages,
-            currentState.messages,
-          ),
+          messages: historyMessages,
+          isTyping: false,
           hasHydratedActiveSession: true,
           sessionSummary: summary,
           archivedMessageCount: archivedCount,
+          agentPresetName,
+          effectiveModelName,
         })
-        return
-      }
-
-      updateChatStore({
-        messages: historyMessages,
-        isTyping: false,
-        hasHydratedActiveSession: true,
-        sessionSummary: summary,
-        archivedMessageCount: archivedCount,
-      })
-    })
+      },
+    )
     .catch((error) => {
       console.error("Failed to restore last session history:", error)
 
@@ -393,8 +405,13 @@ export async function switchChatSession(sessionId: string) {
   }
 
   try {
-    const { messages: historyMessages, summary, archivedCount } =
-      await loadSessionMessages(sessionId)
+    const {
+      messages: historyMessages,
+      summary,
+      archivedCount,
+      agentPresetName,
+      effectiveModelName,
+    } = await loadSessionMessages(sessionId)
 
     disconnectChatInternal({ clearDesiredConnection: false })
     setActiveSessionId(sessionId)
@@ -405,6 +422,8 @@ export async function switchChatSession(sessionId: string) {
       contextUsage: undefined,
       sessionSummary: summary,
       archivedMessageCount: archivedCount,
+      agentPresetName,
+      effectiveModelName,
     })
 
     if (store.get(gatewayAtom).status === "running") {
@@ -418,7 +437,11 @@ export async function switchChatSession(sessionId: string) {
 }
 
 export async function newChatSession() {
-  if (getChatState().messages.length === 0) {
+  const currentState = getChatState()
+  if (
+    currentState.messages.length === 0 &&
+    currentState.agentPresetName === "default"
+  ) {
     return
   }
 
@@ -431,6 +454,8 @@ export async function newChatSession() {
     contextUsage: undefined,
     sessionSummary: undefined,
     archivedMessageCount: undefined,
+    agentPresetName: "default",
+    effectiveModelName: undefined,
   })
 
   if (store.get(gatewayAtom).status === "running") {
@@ -486,8 +511,13 @@ export async function forkChatSession(visibleIndex: number) {
   }
 
   try {
-    const { messages: historyMessages, summary, archivedCount } =
-      await loadSessionMessages(newSessionId)
+    const {
+      messages: historyMessages,
+      summary,
+      archivedCount,
+      agentPresetName,
+      effectiveModelName,
+    } = await loadSessionMessages(newSessionId)
 
     disconnectChatInternal({ clearDesiredConnection: false })
     setActiveSessionId(newSessionId)
@@ -498,6 +528,8 @@ export async function forkChatSession(visibleIndex: number) {
       contextUsage: undefined,
       sessionSummary: summary,
       archivedMessageCount: archivedCount,
+      agentPresetName,
+      effectiveModelName,
     })
 
     if (store.get(gatewayAtom).status === "running") {

@@ -14,6 +14,9 @@ import {
 
 interface ModelSelectorProps {
   defaultModelName: string
+  displayModelName?: string
+  disabled?: boolean
+  disabledReason?: string
   apiKeyModels: ModelInfo[]
   oauthModels: ModelInfo[]
   localModels: ModelInfo[]
@@ -22,6 +25,9 @@ interface ModelSelectorProps {
 
 export function ModelSelector({
   defaultModelName,
+  displayModelName,
+  disabled,
+  disabledReason,
   apiKeyModels,
   oauthModels,
   localModels,
@@ -29,13 +35,22 @@ export function ModelSelector({
 }: ModelSelectorProps) {
   const { t } = useTranslation()
 
+  const selectedModelName = displayModelName ?? defaultModelName
+
   return (
-    <Select value={defaultModelName} onValueChange={onValueChange}>
+    <Select
+      value={selectedModelName}
+      disabled={disabled}
+      onValueChange={onValueChange}
+    >
       <SelectTrigger
         size="sm"
+        title={disabledReason}
         className="text-muted-foreground hover:text-foreground focus-visible:border-input h-8 max-w-[160px] min-w-[80px] bg-transparent shadow-none focus-visible:ring-0 sm:max-w-[220px]"
       >
-        <SelectValue placeholder={t("chat.noModel")} />
+        <SelectValue placeholder={t("chat.noModel")}>
+          {selectedModelName || undefined}
+        </SelectValue>
       </SelectTrigger>
       <SelectContent position="popper" align="start">
         {apiKeyModels.length > 0 && (

@@ -74,7 +74,13 @@ type AgentContextDefinition struct {
 // structured files are absent, it falls back to the legacy AGENTS.md layout so
 // the current runtime can transition incrementally.
 func (cb *ContextBuilder) LoadAgentDefinition() AgentContextDefinition {
-	return loadAgentDefinition(cb.workspace)
+	return LoadAgentDefinition(cb.workspace)
+}
+
+// LoadAgentDefinition parses a workspace definition without constructing a
+// ContextBuilder or initializing any workspace-backed stores.
+func LoadAgentDefinition(workspace string) AgentContextDefinition {
+	return loadAgentDefinition(workspace)
 }
 
 func loadAgentDefinition(workspace string) AgentContextDefinition {

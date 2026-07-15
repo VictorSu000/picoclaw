@@ -47,7 +47,7 @@ interface ConfigSectionCardProps {
   children: ReactNode
 }
 
-function ConfigSectionCard({
+export function ConfigSectionCard({
   title,
   description,
   children,

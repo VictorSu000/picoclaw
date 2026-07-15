@@ -38,6 +38,8 @@ export interface SessionDetail {
     }[]
   }[]
   summary: string
+  agent_preset?: string
+  effective_model?: string
   archived_count?: number
   created: string
   updated: string

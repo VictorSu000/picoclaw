@@ -43,6 +43,8 @@ export interface LoadedSessionHistory {
   messages: ChatMessage[]
   summary: string
   archivedCount: number
+  agentPresetName: string
+  effectiveModelName?: string
 }
 
 export async function loadSessionMessages(
@@ -70,6 +72,8 @@ export async function loadSessionMessages(
     messages,
     summary: detail.summary ?? "",
     archivedCount: detail.archived_count ?? 0,
+    agentPresetName: detail.agent_preset?.trim() || "default",
+    effectiveModelName: detail.effective_model?.trim() || undefined,
   }
 }
 

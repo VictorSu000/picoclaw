@@ -77,6 +77,8 @@ export interface ChatStoreState {
   // archivedMessageCount is the number of leading visible messages restored
   // from the compaction archive (view-only; not part of the LLM context).
   archivedMessageCount?: number
+  agentPresetName: string
+  effectiveModelName?: string
 }
 
 type ChatStorePatch = Partial<ChatStoreState>
@@ -87,6 +89,7 @@ const DEFAULT_CHAT_STATE: ChatStoreState = {
   isTyping: false,
   activeSessionId: getInitialActiveSessionId(),
   hasHydratedActiveSession: false,
+  agentPresetName: "default",
 }
 
 export const chatAtom = atom<ChatStoreState>(DEFAULT_CHAT_STATE)

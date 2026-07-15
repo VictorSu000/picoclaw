@@ -16,6 +16,7 @@ import {
   setLauncherConfig as updateLauncherConfig,
 } from "@/api/system"
 import { ConfigChangeNotice } from "@/components/config-change-notice"
+import { AgentPresetsSection } from "@/components/config/agent-presets-section"
 import {
   AgentDefaultsSection,
   CronSection,
@@ -33,6 +34,7 @@ import {
   type LauncherForm,
   type MCPServerForm,
   type TurnProfileForm,
+  buildAgentPresetsMergePatch,
   buildFormFromConfig,
   parseCIDRText,
   parseFloatField,
@@ -358,6 +360,10 @@ export function ConfigPage() {
           { min: 1, max: 100 },
         )
         const turnProfile = buildTurnProfilePatch(form.turnProfile)
+        const agentPresetsPatch = buildAgentPresetsMergePatch(
+          form.agentPresets,
+          baseline.agentPresets,
+        )
         const heartbeatInterval = parseIntField(
           form.heartbeatInterval,
           "Heartbeat interval",
@@ -577,6 +583,7 @@ export function ConfigPage() {
         }
 
         await patchAppConfig({
+          agent_presets: agentPresetsPatch,
           agents: {
             defaults: {
               workspace,
@@ -636,6 +643,7 @@ export function ConfigPage() {
 
         setBaseline(form)
         queryClient.invalidateQueries({ queryKey: ["config"] })
+        queryClient.invalidateQueries({ queryKey: ["agent-presets"] })
       }
 
       let savedLauncherForm: LauncherForm | null = null
@@ -816,6 +824,12 @@ export function ConfigPage() {
                 form={form}
                 onFieldChange={updateField}
                 onTurnProfileFieldChange={handleTurnProfileFieldChange}
+              />
+
+              <AgentPresetsSection
+                form={form}
+                disabled={saving}
+                onChange={(presets) => updateField("agentPresets", presets)}
               />
 
               <RuntimeSection form={form} onFieldChange={updateField} />

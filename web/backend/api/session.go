@@ -33,11 +33,12 @@ func (h *Handler) registerSessionRoutes(mux *http.ServeMux) {
 
 // sessionFile mirrors the on-disk session JSON structure from pkg/session.
 type sessionFile struct {
-	Key      string              `json:"key"`
-	Messages []providers.Message `json:"messages"`
-	Summary  string              `json:"summary,omitempty"`
-	Created  time.Time           `json:"created"`
-	Updated  time.Time           `json:"updated"`
+	Key         string              `json:"key"`
+	AgentPreset string              `json:"agent_preset,omitempty"`
+	Messages    []providers.Message `json:"messages"`
+	Summary     string              `json:"summary,omitempty"`
+	Created     time.Time           `json:"created"`
+	Updated     time.Time           `json:"updated"`
 
 	// ArchivedRawCount is the number of leading Messages that were dropped from
 	// the active history by context compaction and restored from the archive
@@ -207,7 +208,9 @@ func (h *Handler) readJSONLSession(dir, sessionKey string) (sessionFile, error) 
 	}
 
 	activeMessages, err := h.readSessionMessages(jsonlPath, meta.Skip)
-	if err != nil {
+	if os.IsNotExist(err) {
+		activeMessages = []providers.Message{}
+	} else if err != nil {
 		return sessionFile{}, err
 	}
 
@@ -238,6 +241,7 @@ func (h *Handler) readJSONLSession(dir, sessionKey string) (sessionFile, error) 
 
 	return sessionFile{
 		Key:              meta.Key,
+		AgentPreset:      meta.AgentPreset,
 		Messages:         messages,
 		Summary:          meta.Summary,
 		Created:          created,
@@ -966,7 +970,7 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 	if refErr == nil {
 		sess, err = h.readJSONLSession(dir, ref.Key)
 	}
-	if err == nil && isEmptySession(sess) {
+	if err == nil && isEmptySession(sess) && strings.TrimSpace(sess.AgentPreset) == "" {
 		err = os.ErrNotExist
 	}
 	if err != nil {
@@ -974,7 +978,7 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 			if legacyRef, legacyErr := h.findLegacyPicoSession(dir, sessionID); legacyErr == nil {
 				sess, err = h.readLegacySession(legacyRef.Path)
 			}
-			if err == nil && isEmptySession(sess) {
+			if err == nil && isEmptySession(sess) && strings.TrimSpace(sess.AgentPreset) == "" {
 				err = os.ErrNotExist
 			}
 		}
@@ -994,6 +998,12 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	messages := detailSessionMessages(sess.Messages, toolFeedbackMaxArgsLength)
+	cfg, configErr := config.LoadConfig(h.configPath)
+	effectiveModel := ""
+	if configErr == nil {
+		route, _ := picoRouteAllocation(cfg, sessionID)
+		effectiveModel, _, _ = effectiveModelForAgentPreset(cfg, route.AgentID, sess.AgentPreset)
+	}
 
 	// archivedCount is the number of leading transcript entries that come from
 	// the archive (compaction-dropped history). The frontend uses it to render a
@@ -1004,12 +1014,14 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"id":             sessionID,
-		"messages":       messages,
-		"summary":        sess.Summary,
-		"archived_count": archivedCount,
-		"created":        sess.Created.Format(time.RFC3339),
-		"updated":        sess.Updated.Format(time.RFC3339),
+		"id":              sessionID,
+		"messages":        messages,
+		"summary":         sess.Summary,
+		"agent_preset":    agentPresetResponseName(sess.AgentPreset),
+		"effective_model": effectiveModel,
+		"archived_count":  archivedCount,
+		"created":         sess.Created.Format(time.RFC3339),
+		"updated":         sess.Updated.Format(time.RFC3339),
 	})
 }
 
@@ -1401,21 +1413,16 @@ func (h *Handler) handleForkSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build a structured scope matching what the gateway produces for pico
-	// web chat sessions (default dimensions = ["chat"], ChatType = "direct").
-	// The session key MUST be derived from the scope (not the legacy alias)
-	// so it matches the key the gateway computes when the user sends the
-	// first message in the forked session.
-	scope := session.SessionScope{
-		Version:    session.ScopeVersionV1,
-		AgentID:    "main",
-		Channel:    "pico",
-		Account:    "default",
-		Dimensions: []string{"chat"},
-		Values:     map[string]string{"chat": "direct:pico:" + req.NewSessionID},
+	// Build the same routed scope the gateway will use when the first message
+	// is sent in the forked Pico session.
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, "failed to load config", http.StatusInternalServerError)
+		return
 	}
-	newSessionKey := session.BuildSessionKey(scope)
-	legacyAlias := "agent:main:pico:direct:pico:" + req.NewSessionID
+	_, allocation := picoRouteAllocation(cfg, req.NewSessionID)
+	scope := allocation.Scope
+	newSessionKey := allocation.SessionKey
 
 	// Reject if the new session already exists (check both opaque and legacy).
 	if _, err := h.findPicoJSONLSession(dir, req.NewSessionID); err == nil {
@@ -1520,12 +1527,13 @@ func (h *Handler) handleForkSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	meta := memory.SessionMeta{
-		Key:       newSessionKey,
-		Count:     len(forkedMessages),
-		CreatedAt: now,
-		UpdatedAt: now,
-		Scope:     scopeData,
-		Aliases:   []string{legacyAlias},
+		Key:         newSessionKey,
+		AgentPreset: sess.AgentPreset,
+		Count:       len(forkedMessages),
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		Scope:       scopeData,
+		Aliases:     append([]string(nil), allocation.SessionAliases...),
 	}
 
 	metaData, err := json.MarshalIndent(meta, "", "  ")

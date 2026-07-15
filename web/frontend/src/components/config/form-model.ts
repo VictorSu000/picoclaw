@@ -21,6 +21,7 @@ export interface CoreConfigForm {
   summarizeMessageThreshold: string
   summarizeTokenPercent: string
   turnProfile: TurnProfileForm
+  agentPresets: AgentPresetForm[]
   dmScope: string
   heartbeatEnabled: boolean
   heartbeatInterval: string
@@ -54,6 +55,22 @@ export interface TurnProfileForm {
   skillsAllowText: string
   toolsMode: TurnProfileMode
   toolsAllowText: string
+}
+
+export type PresetOverrideMode = "inherit" | "custom"
+
+export interface AgentPresetForm {
+  id: string
+  name: string
+  modelMode: PresetOverrideMode
+  primaryModel: string
+  fallbackModels: string[]
+  toolsMode: PresetOverrideMode
+  tools: string[]
+  skillsMode: PresetOverrideMode
+  skills: string[]
+  mcpMode: PresetOverrideMode
+  mcpServers: string[]
 }
 
 export interface MCPServerForm {
@@ -140,6 +157,7 @@ export const EMPTY_FORM: CoreConfigForm = {
     toolsMode: "default",
     toolsAllowText: "",
   },
+  agentPresets: [],
   dmScope: "per-channel-peer",
   heartbeatEnabled: true,
   heartbeatInterval: "30",
@@ -288,6 +306,154 @@ function mapTurnProfile(value: unknown): TurnProfileForm {
   }
 }
 
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value.filter((item): item is string => typeof item === "string")
+}
+
+function presetID(name: string): string {
+  const encoded = encodeURIComponent(name)
+  return encoded
+    ? `preset-${encoded}`
+    : `preset-${Math.random().toString(36).slice(2, 10)}`
+}
+
+function mapAgentPresets(value: unknown): AgentPresetForm[] {
+  return Object.entries(asRecord(value))
+    .map(([name, rawPreset]) => {
+      const preset = asRecord(rawPreset)
+      const rawModel = preset.model
+      const model = asRecord(rawModel)
+      const primaryModel =
+        typeof rawModel === "string" ? rawModel : asString(model.primary)
+
+      return {
+        id: presetID(name),
+        name,
+        modelMode: rawModel === undefined ? "inherit" : "custom",
+        primaryModel,
+        fallbackModels: stringList(model.fallbacks),
+        toolsMode: preset.tools === undefined ? "inherit" : "custom",
+        tools: stringList(preset.tools),
+        skillsMode: preset.skills === undefined ? "inherit" : "custom",
+        skills: stringList(preset.skills),
+        mcpMode: preset.mcp === undefined ? "inherit" : "custom",
+        mcpServers: stringList(preset.mcp),
+      } satisfies AgentPresetForm
+    })
+    .sort((left, right) =>
+      left.name.toLowerCase().localeCompare(right.name.toLowerCase()),
+    )
+}
+
+export function createEmptyAgentPresetForm(index: number): AgentPresetForm {
+  return {
+    id: `preset-new-${Date.now()}-${index}`,
+    name: "",
+    modelMode: "inherit",
+    primaryModel: "",
+    fallbackModels: [],
+    toolsMode: "inherit",
+    tools: [],
+    skillsMode: "inherit",
+    skills: [],
+    mcpMode: "inherit",
+    mcpServers: [],
+  }
+}
+
+function normalizedUniqueList(values: string[]): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const rawValue of values) {
+    const value = rawValue.trim()
+    const key = value.toLowerCase()
+    if (!value || seen.has(key)) continue
+    seen.add(key)
+    result.push(value)
+  }
+  return result
+}
+
+export function buildAgentPresetsMergePatch(
+  presets: AgentPresetForm[],
+  baseline: AgentPresetForm[],
+): Record<string, Record<string, unknown> | null> {
+  const normalized = presets.map((preset) => ({
+    ...preset,
+    name: preset.name.trim(),
+    primaryModel: preset.primaryModel.trim(),
+    fallbackModels: normalizedUniqueList(preset.fallbackModels),
+    tools: normalizedUniqueList(preset.tools),
+    skills: normalizedUniqueList(preset.skills),
+    mcpServers: normalizedUniqueList(preset.mcpServers),
+  }))
+
+  const names = new Map<string, string>()
+  for (const preset of normalized) {
+    const lowerName = preset.name.toLowerCase()
+    if (!preset.name) {
+      throw new Error("Agent preset name is required.")
+    }
+    if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(lowerName)) {
+      throw new Error(`Invalid agent preset name: ${preset.name}.`)
+    }
+    if (lowerName === "default") {
+      throw new Error('Agent preset name "default" is reserved.')
+    }
+    if (names.has(lowerName)) {
+      throw new Error(`Agent preset names must be unique: ${preset.name}.`)
+    }
+    names.set(lowerName, preset.name)
+
+    if (preset.modelMode === "custom") {
+      if (!preset.primaryModel) {
+        throw new Error(`Agent preset ${preset.name} requires a primary model.`)
+      }
+      if (
+        preset.fallbackModels.some(
+          (fallback) =>
+            fallback.toLowerCase() === preset.primaryModel.toLowerCase(),
+        )
+      ) {
+        throw new Error(
+          `Agent preset ${preset.name} cannot use its primary model as a fallback.`,
+        )
+      }
+    }
+  }
+
+  const previousNames = new Set(
+    baseline.map((preset) => preset.name.trim()).filter(Boolean),
+  )
+  const currentNames = new Set(normalized.map((preset) => preset.name))
+  const patch: Record<string, Record<string, unknown> | null> = {}
+
+  for (const oldName of previousNames) {
+    if (!currentNames.has(oldName)) {
+      patch[oldName] = null
+    }
+  }
+  for (const preset of normalized) {
+    patch[preset.name] = {
+      model:
+        preset.modelMode === "inherit"
+          ? null
+          : {
+              primary: preset.primaryModel,
+              fallbacks: preset.fallbackModels,
+            },
+      tools: preset.toolsMode === "inherit" ? null : preset.tools,
+      skills: preset.skillsMode === "inherit" ? null : preset.skills,
+      mcp: preset.mcpMode === "inherit" ? null : preset.mcpServers,
+    }
+  }
+
+  return patch
+}
+
 export function buildFormFromConfig(config: unknown): CoreConfigForm {
   const root = asRecord(config)
   const agents = asRecord(root.agents)
@@ -377,6 +543,7 @@ export function buildFormFromConfig(config: unknown): CoreConfigForm {
       EMPTY_FORM.summarizeTokenPercent,
     ),
     turnProfile: mapTurnProfile(defaults.turn_profile),
+    agentPresets: mapAgentPresets(root.agent_presets),
     dmScope: asString(session.dm_scope) || EMPTY_FORM.dmScope,
     heartbeatEnabled:
       heartbeat.enabled === undefined
