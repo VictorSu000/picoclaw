@@ -414,7 +414,10 @@ func (h *Handler) findLegacyPicoSessions(dir string) ([]picoLegacySessionRef, er
 }
 
 func jsonlSessionRefFromFilename(name string) (picoJSONLSessionRef, bool) {
-	if !strings.HasSuffix(name, ".jsonl") {
+	// Archive files are sidecars of active sessions, not standalone sessions.
+	// Without this check, the legacy filename fallback interprets
+	// "<session>.archive.jsonl" as a session whose ID ends in ".archive".
+	if !strings.HasSuffix(name, ".jsonl") || strings.HasSuffix(name, ".archive.jsonl") {
 		return picoJSONLSessionRef{}, false
 	}
 	base := strings.TrimSuffix(name, ".jsonl")

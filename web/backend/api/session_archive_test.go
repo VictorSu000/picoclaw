@@ -91,6 +91,60 @@ func TestHandleGetSession_IncludesArchivedHistory(t *testing.T) {
 	}
 }
 
+// TestHandleListSessions_ExcludesArchiveSidecar verifies that an archive file
+// contributes history to its active session without appearing as a separate
+// "<id>.archive" session in the Web UI session list.
+func TestHandleListSessions_ExcludesArchiveSidecar(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	dir := sessionsTestDir(t, configPath)
+	store, err := memory.NewJSONLStore(dir)
+	if err != nil {
+		t.Fatalf("NewJSONLStore() error = %v", err)
+	}
+
+	sessionKey := legacyPicoSessionPrefix + "archive-sidecar"
+	if err := store.AddFullMessage(nil, sessionKey, providers.Message{
+		Role:    "user",
+		Content: "active message",
+	}); err != nil {
+		t.Fatalf("AddFullMessage() error = %v", err)
+	}
+	if err := store.ArchiveMessages(nil, sessionKey, []providers.Message{{
+		Role:    "user",
+		Content: "archived message",
+	}}); err != nil {
+		t.Fatalf("ArchiveMessages() error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var items []sessionListItem
+	if err := json.Unmarshal(rec.Body.Bytes(), &items); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1: %+v", len(items), items)
+	}
+	if items[0].ID != "archive-sidecar" {
+		t.Fatalf("items[0].ID = %q, want %q", items[0].ID, "archive-sidecar")
+	}
+	if items[0].MessageCount != 2 {
+		t.Fatalf("items[0].MessageCount = %d, want 2", items[0].MessageCount)
+	}
+}
+
 // TestHandleDeleteSession_RemovesArchive verifies that deleting a session also
 // removes its archive file.
 func TestHandleDeleteSession_RemovesArchive(t *testing.T) {
