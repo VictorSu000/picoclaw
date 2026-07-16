@@ -33,8 +33,11 @@ func newSeahorseContextManager(_ json.RawMessage, al *AgentLoop) (ContextManager
 	agent := al.registry.GetDefaultAgent()
 	dbPath := agent.Workspace + "/sessions/seahorse.db"
 
-	// Create CompleteFn from provider
-	completeFn := providerToCompleteFn(agent.Provider, agent.Model)
+	// Seahorse invokes the provider directly for compaction. Wrap it with the
+	// primary candidate's limiter so compaction shares the configured RPM bucket
+	// with normal conversation turns.
+	completeProvider := withCurrentCandidateRateLimit(agent.Provider, al, agent.Candidates)
+	completeFn := providerToCompleteFn(completeProvider, agent.Model)
 
 	// Create engine
 	engine, err := seahorse.NewEngine(seahorse.Config{

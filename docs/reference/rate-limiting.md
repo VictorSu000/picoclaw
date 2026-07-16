@@ -26,7 +26,10 @@ The rate limiter runs **after** the cooldown check and **before** the provider c
 - Candidates already in cooldown are skipped entirely (no token consumed)
 - Candidates that are available get throttled to the configured RPM
 
-The same check applies in `ExecuteImage`.
+The same check applies in `ExecuteImage`. Internal calls that use the active
+model directly, including conversation compaction, evolution tasks, and the
+legacy subagent fallback, share the primary candidate's limiter instead of
+bypassing it.
 
 ### Thread safety
 
@@ -96,4 +99,5 @@ To reduce burstiness for strict APIs, set a lower `rpm` and rely on the steady-s
 | `pkg/providers/ratelimiter_test.go` | Unit tests for limiter and registry |
 | `pkg/providers/fallback.go` | `FallbackCandidate.RPM` field; `FallbackChain.rl`; `Wait()` call in `Execute`/`ExecuteImage` |
 | `pkg/agent/model_resolution.go` | Resolves candidates from `model_list`, preserving stable config identity and propagating `RPM` into `FallbackCandidate` |
+| `pkg/agent/rate_limited_provider.go` | Routes internal direct-provider calls through the shared candidate limiter |
 | `pkg/agent/loop.go` | Build `RateLimiterRegistry`, register all agents' candidates, pass to `NewFallbackChain` |

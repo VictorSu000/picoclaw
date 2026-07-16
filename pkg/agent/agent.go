@@ -412,10 +412,32 @@ func (al *AgentLoop) ReloadProviderAndConfig(
 		return fmt.Errorf("context canceled after registry creation: %w", err)
 	}
 
-	// Ensure shared tools are re-registered on the new registry
-	registerSharedTools(al, cfg, al.bus, registry, provider)
+	// Build the replacement limiter before constructing any component that can
+	// issue direct provider calls, so every new component shares this registry.
+	newRL := providers.NewRateLimiterRegistry()
+	for _, agentID := range registry.ListAgentIDs() {
+		if agent, ok := registry.GetAgent(agentID); ok {
+			newRL.RegisterCandidates(agent.Candidates)
+			newRL.RegisterCandidates(agent.LightCandidates)
+			for _, candidates := range agent.PresetCandidates {
+				newRL.RegisterCandidates(candidates)
+			}
+		}
+	}
+	newFallback := providers.NewFallbackChain(providers.NewCooldownTracker(), newRL)
 
-	newEvolution, evolutionErr := newEvolutionBridge(registry, cfg, provider)
+	// Ensure shared tools are re-registered on the new registry
+	registerSharedTools(al, cfg, al.bus, registry, provider, newFallback)
+
+	evolutionProvider := provider
+	if defaultAgent := registry.GetDefaultAgent(); defaultAgent != nil {
+		evolutionProvider = withCandidateRateLimit(
+			provider,
+			newFallback,
+			defaultAgent.Candidates,
+		)
+	}
+	newEvolution, evolutionErr := newEvolutionBridge(registry, cfg, evolutionProvider)
 	if evolutionErr != nil {
 		logger.WarnCF("agent", "Failed to reinitialize evolution bridge during reload",
 			map[string]any{"error": evolutionErr.Error()})
@@ -439,18 +461,8 @@ func (al *AgentLoop) ReloadProviderAndConfig(
 	al.registry = registry
 	al.evolution = newEvolution
 
-	// Also update fallback chain with new config; rebuild rate limiter registry.
-	newRL := providers.NewRateLimiterRegistry()
-	for _, agentID := range registry.ListAgentIDs() {
-		if agent, ok := registry.GetAgent(agentID); ok {
-			newRL.RegisterCandidates(agent.Candidates)
-			newRL.RegisterCandidates(agent.LightCandidates)
-			for _, candidates := range agent.PresetCandidates {
-				newRL.RegisterCandidates(candidates)
-			}
-		}
-	}
-	al.fallback = providers.NewFallbackChain(providers.NewCooldownTracker(), newRL)
+	// Also update fallback chain with the new config.
+	al.fallback = newFallback
 
 	al.mu.Unlock()
 	al.refreshRuntimeEventLogger(cfg)

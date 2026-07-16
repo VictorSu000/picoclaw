@@ -323,12 +323,13 @@ func (m *legacyContextManager) retryLLMCall(
 
 	var resp *providers.LLMResponse
 	var err error
+	provider := withCurrentCandidateRateLimit(agent.Provider, m.al, agent.Candidates)
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		m.al.activeRequestsInc()
 		resp, err = func() (*providers.LLMResponse, error) {
 			defer m.al.activeRequestsDec()
-			return agent.Provider.Chat(
+			return provider.Chat(
 				ctx,
 				[]providers.Message{{Role: "user", Content: prompt}},
 				nil,

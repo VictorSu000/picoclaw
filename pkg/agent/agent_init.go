@@ -53,7 +53,17 @@ func NewAgentLoop(
 		stateManager = state.NewManager(defaultAgent.Workspace)
 	}
 
-	bridge, err := newEvolutionBridge(registry, cfg, provider)
+	// Evolution performs background LLM calls outside the normal turn pipeline.
+	// Keep those calls on the same primary-model RPM bucket as foreground turns.
+	evolutionProvider := provider
+	if defaultAgent != nil {
+		evolutionProvider = withCandidateRateLimit(
+			provider,
+			fallbackChain,
+			defaultAgent.Candidates,
+		)
+	}
+	bridge, err := newEvolutionBridge(registry, cfg, evolutionProvider)
 	if err != nil {
 		logger.WarnCF("agent", "Failed to initialize evolution bridge", map[string]any{
 			"error": err.Error(),
@@ -103,7 +113,7 @@ func NewAgentLoop(
 	al.contextManager = al.resolveContextManager()
 
 	// Register shared tools to all agents (now that al is created)
-	registerSharedTools(al, cfg, msgBus, registry, provider)
+	registerSharedTools(al, cfg, msgBus, registry, provider, fallbackChain)
 
 	return al
 }
@@ -114,6 +124,7 @@ func registerSharedTools(
 	msgBus interfaces.MessageBus,
 	registry *AgentRegistry,
 	provider providers.LLMProvider,
+	fallback *providers.FallbackChain,
 ) {
 	allowReadPaths := buildAllowReadPatterns(cfg)
 	var ttsProvider tts.TTSProvider
@@ -293,7 +304,10 @@ func registerSharedTools(
 		spawnEnabled := cfg.Tools.IsToolEnabled("spawn")
 		spawnStatusEnabled := cfg.Tools.IsToolEnabled("spawn_status")
 		if (spawnEnabled || spawnStatusEnabled) && cfg.Tools.IsToolEnabled("subagent") {
-			subagentManager := tools.NewSubagentManager(provider, agent.Model, agent.Workspace)
+			// The manager normally delegates to AgentLoop sub-turns. Its legacy
+			// direct-provider fallback must honor the same model RPM as well.
+			subagentProvider := withCandidateRateLimit(provider, fallback, agent.Candidates)
+			subagentManager := tools.NewSubagentManager(subagentProvider, agent.Model, agent.Workspace)
 			subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
 
 			// Inject a media resolver so the legacy RunToolLoop fallback path can
