@@ -1,4 +1,4 @@
-import { getSessionHistory } from "@/api/sessions"
+import { type SessionDetail, getSessionHistory } from "@/api/sessions"
 import { normalizeUnixTimestamp } from "@/features/chat/state"
 import {
   parseToolCallsValue,
@@ -51,6 +51,12 @@ export async function loadSessionMessages(
   sessionId: string,
 ): Promise<LoadedSessionHistory> {
   const detail = await getSessionHistory(sessionId)
+  return sessionDetailToLoadedHistory(detail)
+}
+
+export function sessionDetailToLoadedHistory(
+  detail: SessionDetail,
+): LoadedSessionHistory {
   const messages = detail.messages.map((message, index) => ({
     id: `hist-${index}-${Date.now()}`,
     role: message.role,

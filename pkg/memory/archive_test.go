@@ -80,6 +80,38 @@ func TestArchiveMessages_AppendsAcrossCalls(t *testing.T) {
 	}
 }
 
+func TestReplaceArchivedMessages_ReplacesAndRemovesArchive(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	if err := store.ArchiveMessages(ctx, "s1", []providers.Message{
+		{Role: "user", Content: "old"},
+		{Role: "assistant", Content: "remove"},
+	}); err != nil {
+		t.Fatalf("ArchiveMessages: %v", err)
+	}
+	if err := store.ReplaceArchivedMessages(ctx, "s1", []providers.Message{
+		{Role: "user", Content: "remaining"},
+	}); err != nil {
+		t.Fatalf("ReplaceArchivedMessages: %v", err)
+	}
+
+	got, err := store.ReadArchivedMessages(ctx, "s1")
+	if err != nil {
+		t.Fatalf("ReadArchivedMessages: %v", err)
+	}
+	if len(got) != 1 || got[0].Content != "remaining" {
+		t.Fatalf("archive = %+v, want [remaining]", got)
+	}
+
+	if err := store.ReplaceArchivedMessages(ctx, "s1", nil); err != nil {
+		t.Fatalf("ReplaceArchivedMessages(nil): %v", err)
+	}
+	if _, err := os.Stat(store.archivePath("s1")); !os.IsNotExist(err) {
+		t.Fatalf("expected archive file removal, stat err = %v", err)
+	}
+}
+
 // TestArchiveMessages_SurvivesActiveCompaction verifies that archiving the
 // dropped prefix before truncating the active history preserves it even after
 // Compact physically rewrites the active JSONL — the core guarantee behind the

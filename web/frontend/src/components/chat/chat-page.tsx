@@ -1,4 +1,11 @@
-import { IconChevronDown, IconChevronUp, IconGitFork, IconPlus } from "@tabler/icons-react"
+import {
+  IconChevronDown,
+  IconChevronUp,
+  IconGitFork,
+  IconLoader2,
+  IconPlus,
+  IconTrash,
+} from "@tabler/icons-react"
 import { useAtom } from "jotai"
 import {
   type ChangeEvent,
@@ -9,6 +16,7 @@ import {
   useState,
 } from "react"
 import { useTranslation } from "react-i18next"
+import { toast } from "sonner"
 
 import { AssistantMessage } from "@/components/chat/assistant-message"
 import {
@@ -22,12 +30,17 @@ import { SessionHistoryMenu } from "@/components/chat/session-history-menu"
 import { TypingIndicator } from "@/components/chat/typing-indicator"
 import { UserMessage } from "@/components/chat/user-message"
 import { PageHeader } from "@/components/page-header"
-import { Button } from "@/components/ui/button"
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { Button } from "@/components/ui/button"
 import {
   Select,
   SelectContent,
@@ -35,6 +48,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import {
   CHAT_IMAGE_ACCEPT,
   buildChatImageAttachments,
@@ -54,7 +72,6 @@ import {
   shouldShowAssistantMessage,
 } from "@/store/chat"
 import type { GatewayState } from "@/store/gateway"
-import { toast } from "sonner"
 
 function resolveChatInputDisabledReason({
   hasDefaultModel,
@@ -185,14 +202,14 @@ export function ChatPage() {
     value: AssistantDetailVisibility
     label: string
   }> = [
-      { value: "none", label: t("chat.assistantDetailVisibility.none") },
-      { value: "thought", label: t("chat.assistantDetailVisibility.thought") },
-      {
-        value: "tool_calls",
-        label: t("chat.assistantDetailVisibility.toolCalls"),
-      },
-      { value: "all", label: t("chat.assistantDetailVisibility.all") },
-    ]
+    { value: "none", label: t("chat.assistantDetailVisibility.none") },
+    { value: "thought", label: t("chat.assistantDetailVisibility.thought") },
+    {
+      value: "tool_calls",
+      label: t("chat.assistantDetailVisibility.toolCalls"),
+    },
+    { value: "all", label: t("chat.assistantDetailVisibility.all") },
+  ]
 
   const {
     messages,
@@ -208,6 +225,7 @@ export function ChatPage() {
     switchSession,
     newChat,
     forkChat,
+    deleteMessageSeries,
   } = usePicoChat()
 
   const { state: gwState } = useGateway()
@@ -398,9 +416,16 @@ export function ChatPage() {
   const canSubmit =
     canInput && (Boolean(input.trim()) || attachments.length > 0)
 
-  const [forkingMessageIndex, setForkingMessageIndex] = useState<
+  const [forkingMessageIndex, setForkingMessageIndex] = useState<number | null>(
+    null,
+  )
+  const [deletingMessageIndex, setDeletingMessageIndex] = useState<
     number | null
   >(null)
+  const [pendingMessageDelete, setPendingMessageDelete] = useState<{
+    visibleIndex: number
+    archived: boolean
+  } | null>(null)
 
   const handleForkChat = async (visibleIndex: number) => {
     setForkingMessageIndex(visibleIndex)
@@ -410,6 +435,23 @@ export function ChatPage() {
       toast.error(t("chat.forkSessionFailed"))
     } finally {
       setForkingMessageIndex(null)
+    }
+  }
+
+  const handleDeleteMessageSeries = async () => {
+    if (!pendingMessageDelete) return
+
+    const { visibleIndex } = pendingMessageDelete
+    setDeletingMessageIndex(visibleIndex)
+    try {
+      await deleteMessageSeries(visibleIndex)
+      setPendingMessageDelete(null)
+      toast.success(t("chat.deleteMessageSuccess"))
+      await loadSessions(true)
+    } catch {
+      toast.error(t("chat.deleteMessageFailed"))
+    } finally {
+      setDeletingMessageIndex(null)
     }
   }
 
@@ -551,16 +593,23 @@ export function ChatPage() {
                 visibleArchivedCount++
               }
             }
-            const hasSummary = Boolean(
-              sessionSummary && sessionSummary.trim(),
-            )
+            const hasSummary = Boolean(sessionSummary && sessionSummary.trim())
 
             return visibleMessages.map((msg, visibleIndex) => {
               const isForking = forkingMessageIndex === visibleIndex
+              const isDeleting = deletingMessageIndex === visibleIndex
               const isArchived = visibleIndex < visibleArchivedCount
               const showNoticeBefore =
                 visibleIndex === visibleArchivedCount &&
                 (visibleArchivedCount > 0 || hasSummary)
+              const isConversationBoundary =
+                msg.role === "user" ||
+                (msg.role === "assistant" &&
+                  (!msg.kind || msg.kind === "normal"))
+              const isLastVisibleMessage =
+                visibleIndex === visibleMessages.length - 1
+              const hasPendingMessageMutation =
+                forkingMessageIndex !== null || deletingMessageIndex !== null
 
               return (
                 <div key={msg.id}>
@@ -570,39 +619,6 @@ export function ChatPage() {
                       showDivider={visibleArchivedCount > 0}
                     />
                   )}
-                  {/* Fork button between messages – only after user or assistant "normal" messages. */}
-                  {visibleIndex > 0 && (() => {
-                    const prevMsg = visibleMessages[visibleIndex - 1]
-                    const canFork =
-                      prevMsg.role === "user" ||
-                      (prevMsg.role === "assistant" &&
-                        (!prevMsg.kind || prevMsg.kind === "normal"))
-                    if (!canFork) return null
-                    return (
-                      <div className="flex justify-center py-0">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="text-muted-foreground/60 hover:text-foreground h-7 gap-1.5"
-                              disabled={isForking || forkingMessageIndex !== null}
-                              onClick={() => handleForkChat(visibleIndex)}
-                            >
-                              <IconGitFork className="size-3.5" />
-                              <span className="text-xs">
-                                {isForking ? t("chat.forking") : t("chat.fork")}
-                              </span>
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            {t("chat.forkFromHere")}
-                          </TooltipContent>
-                        </Tooltip>
-                      </div>
-                    )
-                  })()}
-
                   <div
                     className={`flex w-full ${isArchived ? "opacity-60" : ""}`}
                   >
@@ -623,6 +639,63 @@ export function ChatPage() {
                       />
                     )}
                   </div>
+
+                  {isConversationBoundary && (
+                    <div className="flex justify-center gap-1 py-0">
+                      {!isLastVisibleMessage && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-muted-foreground/60 hover:text-foreground h-7 gap-1.5"
+                              disabled={isTyping || hasPendingMessageMutation}
+                              onClick={() => handleForkChat(visibleIndex)}
+                            >
+                              <IconGitFork className="size-3.5" />
+                              <span className="text-xs">
+                                {isForking ? t("chat.forking") : t("chat.fork")}
+                              </span>
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {t("chat.forkFromHere")}
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
+
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-muted-foreground/60 hover:bg-destructive/10 hover:text-destructive h-7 gap-1.5"
+                            disabled={isTyping || hasPendingMessageMutation}
+                            onClick={() =>
+                              setPendingMessageDelete({
+                                visibleIndex,
+                                archived: isArchived,
+                              })
+                            }
+                          >
+                            {isDeleting ? (
+                              <IconLoader2 className="size-3.5 animate-spin" />
+                            ) : (
+                              <IconTrash className="size-3.5" />
+                            )}
+                            <span className="text-xs">
+                              {isDeleting
+                                ? t("chat.deletingMessage")
+                                : t("chat.deleteMessage")}
+                            </span>
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          {t("chat.deleteMessageFromHere")}
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  )}
                 </div>
               )
             })
@@ -663,6 +736,50 @@ export function ChatPage() {
         isDragActive={isDragActive}
         contextUsage={contextUsage}
       />
+
+      <AlertDialog
+        open={pendingMessageDelete !== null}
+        onOpenChange={(open) => {
+          if (!open && deletingMessageIndex === null) {
+            setPendingMessageDelete(null)
+          }
+        }}
+      >
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("chat.deleteMessageConfirmTitle")}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingMessageDelete?.archived
+                ? t("chat.deleteArchivedMessageConfirm")
+                : t("chat.deleteMessageConfirm")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingMessageIndex !== null}>
+              {t("chat.deleteMessageCancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={deletingMessageIndex !== null}
+              onClick={(event) => {
+                event.preventDefault()
+                void handleDeleteMessageSeries()
+              }}
+            >
+              {deletingMessageIndex !== null ? (
+                <IconLoader2 className="size-4 animate-spin" />
+              ) : (
+                <IconTrash className="size-4" />
+              )}
+              {deletingMessageIndex !== null
+                ? t("chat.deletingMessage")
+                : t("chat.deleteMessageConfirmButton")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

@@ -2,6 +2,7 @@ import dayjs from "dayjs"
 import { useAtomValue } from "jotai"
 
 import {
+  deleteChatMessageSeries,
   forkChatSession,
   newChatSession,
   sendChatMessage,
@@ -82,5 +83,6 @@ export function usePicoChat() {
     switchSession: switchChatSession,
     newChat: newChatSession,
     forkChat: forkChatSession,
+    deleteMessageSeries: deleteChatMessageSeries,
   }
 }

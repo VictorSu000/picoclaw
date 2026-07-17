@@ -779,6 +779,42 @@ func (s *JSONLStore) ReadArchivedMessages(
 	return readMessages(s.archivePath(sessionKey), 0)
 }
 
+// ReplaceArchivedMessages atomically replaces the display-only archive for a
+// session. An empty history removes the archive sidecar entirely.
+//
+// This is intentionally separate from SetHistory: archived messages are not
+// part of the active LLM context and must never be written back to the active
+// JSONL file when Web UI history is edited.
+func (s *JSONLStore) ReplaceArchivedMessages(
+	_ context.Context, sessionKey string, history []providers.Message,
+) error {
+	history = messageutil.FilterInvalidHistoryMessages(history)
+
+	l := s.sessionLock(sessionKey)
+	l.Lock()
+	defer l.Unlock()
+
+	path := s.archivePath(sessionKey)
+	if len(history) == 0 {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("memory: remove archive: %w", err)
+		}
+		return nil
+	}
+
+	var buf bytes.Buffer
+	for i, msg := range history {
+		line, err := json.Marshal(msg)
+		if err != nil {
+			return fmt.Errorf("memory: marshal archived message %d: %w", i, err)
+		}
+		buf.Write(line)
+		buf.WriteByte('\n')
+	}
+
+	return fileutil.WriteFileAtomic(path, buf.Bytes(), 0o644)
+}
+
 func (s *JSONLStore) GetSummary(
 	_ context.Context, sessionKey string,
 ) (string, error) {

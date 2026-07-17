@@ -10,33 +10,35 @@ export interface SessionSummary {
   is_favorited: boolean
 }
 
+export interface SessionDetailMessage {
+  role: "user" | "assistant"
+  content: string
+  created_at?: string
+  kind?: "normal" | "thought" | "tool_calls"
+  model_name?: string
+  media?: string[]
+  attachments?: {
+    type?: "image" | "audio" | "video" | "file"
+    url: string
+    filename?: string
+    content_type?: string
+  }[]
+  tool_calls?: {
+    id?: string
+    type?: string
+    function?: {
+      name?: string
+      arguments?: string
+    }
+    extra_content?: {
+      tool_feedback_explanation?: string
+    }
+  }[]
+}
+
 export interface SessionDetail {
   id: string
-  messages: {
-    role: "user" | "assistant"
-    content: string
-    created_at?: string
-    kind?: "normal" | "thought" | "tool_calls"
-    model_name?: string
-    media?: string[]
-    attachments?: {
-      type?: "image" | "audio" | "video" | "file"
-      url: string
-      filename?: string
-      content_type?: string
-    }[]
-    tool_calls?: {
-      id?: string
-      type?: string
-      function?: {
-        name?: string
-        arguments?: string
-      }
-      extra_content?: {
-        tool_feedback_explanation?: string
-      }
-    }[]
-  }[]
+  messages: SessionDetailMessage[]
   summary: string
   agent_preset?: string
   effective_model?: string
@@ -79,18 +81,24 @@ export async function deleteSession(id: string): Promise<void> {
 }
 
 export async function favoriteSession(id: string): Promise<void> {
-  const res = await launcherFetch(`/api/sessions/${encodeURIComponent(id)}/favorite`, {
-    method: "POST",
-  })
+  const res = await launcherFetch(
+    `/api/sessions/${encodeURIComponent(id)}/favorite`,
+    {
+      method: "POST",
+    },
+  )
   if (!res.ok) {
     throw new Error(`Failed to favorite session ${id}: ${res.status}`)
   }
 }
 
 export async function unfavoriteSession(id: string): Promise<void> {
-  const res = await launcherFetch(`/api/sessions/${encodeURIComponent(id)}/favorite`, {
-    method: "DELETE",
-  })
+  const res = await launcherFetch(
+    `/api/sessions/${encodeURIComponent(id)}/favorite`,
+    {
+      method: "DELETE",
+    },
+  )
   if (!res.ok) {
     throw new Error(`Failed to unfavorite session ${id}: ${res.status}`)
   }
@@ -100,13 +108,16 @@ export async function renameSession(
   id: string,
   title: string,
 ): Promise<{ id: string; title: string }> {
-  const res = await launcherFetch(`/api/sessions/${encodeURIComponent(id)}/rename`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
+  const res = await launcherFetch(
+    `/api/sessions/${encodeURIComponent(id)}/rename`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ title }),
     },
-    body: JSON.stringify({ title }),
-  })
+  )
   if (!res.ok) {
     throw new Error(`Failed to rename session ${id}: ${res.status}`)
   }
@@ -128,18 +139,40 @@ export async function forkSession(
   newSessionId: string,
   transcriptIndex: number,
 ): Promise<ForkSessionResponse> {
-  const res = await launcherFetch(`/api/sessions/${encodeURIComponent(id)}/fork`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
+  const res = await launcherFetch(
+    `/api/sessions/${encodeURIComponent(id)}/fork`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        new_session_id: newSessionId,
+        transcript_index: transcriptIndex,
+      }),
     },
-    body: JSON.stringify({
-      new_session_id: newSessionId,
-      transcript_index: transcriptIndex,
-    }),
-  })
+  )
   if (!res.ok) {
     throw new Error(`Failed to fork session ${id}: ${res.status}`)
+  }
+  return res.json()
+}
+
+export async function deleteMessageSeries(
+  id: string,
+  transcriptIndex: number,
+): Promise<SessionDetail> {
+  const params = new URLSearchParams({
+    transcript_index: transcriptIndex.toString(),
+  })
+  const res = await launcherFetch(
+    `/api/sessions/${encodeURIComponent(id)}/message-series?${params.toString()}`,
+    { method: "DELETE" },
+  )
+  if (!res.ok) {
+    throw new Error(
+      `Failed to delete a message series from session ${id}: ${res.status}`,
+    )
   }
   return res.json()
 }

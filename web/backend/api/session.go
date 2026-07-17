@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sipeed/picoclaw/pkg/config"
+	"github.com/sipeed/picoclaw/pkg/fileutil"
 	"github.com/sipeed/picoclaw/pkg/memory"
 	"github.com/sipeed/picoclaw/pkg/providers"
 	"github.com/sipeed/picoclaw/pkg/providers/messageutil"
@@ -25,6 +26,7 @@ func (h *Handler) registerSessionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/sessions", h.handleListSessions)
 	mux.HandleFunc("GET /api/sessions/{id}", h.handleGetSession)
 	mux.HandleFunc("DELETE /api/sessions/{id}", h.handleDeleteSession)
+	mux.HandleFunc("DELETE /api/sessions/{id}/message-series", h.handleDeleteMessageSeries)
 	mux.HandleFunc("POST /api/sessions/{id}/favorite", h.handleFavoriteSession)
 	mux.HandleFunc("DELETE /api/sessions/{id}/favorite", h.handleUnfavoriteSession)
 	mux.HandleFunc("POST /api/sessions/{id}/fork", h.handleForkSession)
@@ -76,6 +78,17 @@ type sessionChatAttachment struct {
 	ContentType string `json:"content_type,omitempty"`
 }
 
+type sessionDetailResponse struct {
+	ID             string               `json:"id"`
+	Messages       []sessionChatMessage `json:"messages"`
+	Summary        string               `json:"summary"`
+	AgentPreset    string               `json:"agent_preset,omitempty"`
+	EffectiveModel string               `json:"effective_model,omitempty"`
+	ArchivedCount  int                  `json:"archived_count"`
+	Created        string               `json:"created"`
+	Updated        string               `json:"updated"`
+}
+
 // legacyPicoSessionPrefix is the legacy key prefix used by older Pico JSON/JSONL
 // sessions before structured scope metadata existed.
 const (
@@ -86,8 +99,12 @@ const (
 	// pkg/memory/jsonl.go so oversized lines fail consistently everywhere.
 	maxSessionJSONLLineSize = 10 * 1024 * 1024
 	maxSessionTitleRunes    = 60
+	maxRebuiltSummaryRunes  = 8 * 1024
+	maxSummaryEntryRunes    = 1000
 
 	handledToolResponseSummaryText = "Requested output delivered via tool attachment."
+	rebuiltArchiveSummaryHeader    = "Conversation summary rebuilt from remaining archived history:"
+	rebuiltArchiveOmittedNotice    = "[Earlier archived messages omitted to keep this rebuilt summary concise.]"
 )
 
 func defaultToolFeedbackMaxArgsLength() int {
@@ -396,7 +413,7 @@ func (h *Handler) findLegacyPicoSessions(dir string) ([]picoLegacySessionRef, er
 
 		path := filepath.Join(dir, entry.Name())
 		sess, err := h.readLegacySession(path)
-		if err != nil || isEmptySession(sess) {
+		if err != nil {
 			continue
 		}
 
@@ -972,17 +989,17 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 	err = refErr
 	if refErr == nil {
 		sess, err = h.readJSONLSession(dir, ref.Key)
-	}
-	if err == nil && isEmptySession(sess) && strings.TrimSpace(sess.AgentPreset) == "" {
-		err = os.ErrNotExist
+		if err == nil && isEmptySession(sess) && strings.TrimSpace(sess.AgentPreset) == "" {
+			metaPath := filepath.Join(dir, sanitizeSessionKey(ref.Key)+".meta.json")
+			if _, statErr := os.Stat(metaPath); os.IsNotExist(statErr) {
+				err = os.ErrNotExist
+			}
+		}
 	}
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			if legacyRef, legacyErr := h.findLegacyPicoSession(dir, sessionID); legacyErr == nil {
 				sess, err = h.readLegacySession(legacyRef.Path)
-			}
-			if err == nil && isEmptySession(sess) && strings.TrimSpace(sess.AgentPreset) == "" {
-				err = os.ErrNotExist
 			}
 		}
 		if err != nil {
@@ -995,6 +1012,16 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	response := h.buildSessionDetailResponse(sessionID, sess, toolFeedbackMaxArgsLength)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func (h *Handler) buildSessionDetailResponse(
+	sessionID string,
+	sess sessionFile,
+	toolFeedbackMaxArgsLength int,
+) sessionDetailResponse {
 	for i := range sess.Messages {
 		if sess.Messages[i].CreatedAt == nil {
 			sess.Messages[i].CreatedAt = &sess.Updated
@@ -1015,17 +1042,16 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 	archivedRaw := sess.Messages[:sess.ArchivedRawCount]
 	archivedCount := len(detailSessionMessages(archivedRaw, toolFeedbackMaxArgsLength))
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
-		"id":              sessionID,
-		"messages":        messages,
-		"summary":         sess.Summary,
-		"agent_preset":    agentPresetResponseName(sess.AgentPreset),
-		"effective_model": effectiveModel,
-		"archived_count":  archivedCount,
-		"created":         sess.Created.Format(time.RFC3339),
-		"updated":         sess.Updated.Format(time.RFC3339),
-	})
+	return sessionDetailResponse{
+		ID:             sessionID,
+		Messages:       messages,
+		Summary:        sess.Summary,
+		AgentPreset:    agentPresetResponseName(sess.AgentPreset),
+		EffectiveModel: effectiveModel,
+		ArchivedCount:  archivedCount,
+		Created:        sess.Created.Format(time.RFC3339),
+		Updated:        sess.Updated.Format(time.RFC3339),
+	}
 }
 
 // handleDeleteSession deletes a specific session.
@@ -1378,6 +1404,332 @@ func rawMessageIndexForTranscriptIndex(messages []providers.Message, transcriptI
 	return -1
 }
 
+func forkableTranscriptMessage(msg sessionChatMessage) bool {
+	return msg.Role == "user" ||
+		(msg.Role == "assistant" && (msg.Kind == "" || msg.Kind == "normal"))
+}
+
+// safeRawBoundaryForTranscriptIndex returns the raw persisted boundary after a
+// visible conversation message. When the source assistant record contains tool
+// calls, the boundary also includes its contiguous matching tool results and a
+// hidden handled-response marker. This keeps both fork and delete operations
+// from producing orphaned tool protocol records.
+func safeRawBoundaryForTranscriptIndex(
+	messages []providers.Message,
+	transcriptIndex int,
+	toolFeedbackMaxArgsLength int,
+) int {
+	rawCount := rawMessageIndexForTranscriptIndex(
+		messages,
+		transcriptIndex,
+		toolFeedbackMaxArgsLength,
+	)
+	if rawCount <= 0 || rawCount > len(messages) {
+		return -1
+	}
+
+	source := messages[rawCount-1]
+	if source.Role != "assistant" || len(source.ToolCalls) == 0 {
+		return rawCount
+	}
+
+	expectedToolResults := make(map[string]struct{}, len(source.ToolCalls))
+	for _, toolCall := range source.ToolCalls {
+		if toolCall.ID != "" {
+			expectedToolResults[toolCall.ID] = struct{}{}
+		}
+	}
+
+	boundary := rawCount
+	for boundary < len(messages) && messages[boundary].Role == "tool" {
+		toolCallID := messages[boundary].ToolCallID
+		if _, ok := expectedToolResults[toolCallID]; !ok {
+			break
+		}
+		boundary++
+	}
+
+	if boundary < len(messages) {
+		marker := messages[boundary]
+		if assistantMessageInternalOnly(marker) &&
+			len(sessionAttachments(marker)) == 0 &&
+			len(marker.Media) == 0 {
+			boundary++
+		}
+	}
+
+	return boundary
+}
+
+// rawMessageRangeForTranscriptIndex resolves the complete persisted message
+// series ending at transcriptIndex. The start is exclusive of the previous
+// forkable conversation boundary and the end includes the selected message.
+func rawMessageRangeForTranscriptIndex(
+	messages []providers.Message,
+	transcriptIndex int,
+	toolFeedbackMaxArgsLength int,
+) (int, int, bool) {
+	transcript := detailSessionMessages(messages, toolFeedbackMaxArgsLength)
+	if transcriptIndex < 0 || transcriptIndex >= len(transcript) ||
+		!forkableTranscriptMessage(transcript[transcriptIndex]) {
+		return 0, 0, false
+	}
+
+	end := safeRawBoundaryForTranscriptIndex(
+		messages,
+		transcriptIndex,
+		toolFeedbackMaxArgsLength,
+	)
+	if end <= 0 {
+		return 0, 0, false
+	}
+
+	start := 0
+	for index := transcriptIndex - 1; index >= 0; index-- {
+		if !forkableTranscriptMessage(transcript[index]) {
+			continue
+		}
+		boundary := safeRawBoundaryForTranscriptIndex(
+			messages,
+			index,
+			toolFeedbackMaxArgsLength,
+		)
+		// Multiple visible entries can be projections of the same raw assistant
+		// record (for example content plus a visible message-tool output). Treat
+		// those projections as one indivisible persisted series.
+		if boundary > 0 && boundary < end {
+			start = boundary
+			break
+		}
+	}
+
+	if start >= end || end > len(messages) {
+		return 0, 0, false
+	}
+	return start, end, true
+}
+
+func rawRangeOverlap(start, end, rangeStart, rangeEnd int) int {
+	overlapStart := max(start, rangeStart)
+	overlapEnd := min(end, rangeEnd)
+	if overlapEnd <= overlapStart {
+		return 0
+	}
+	return overlapEnd - overlapStart
+}
+
+func rebuildArchivedSummary(
+	messages []providers.Message,
+	toolFeedbackMaxArgsLength int,
+) string {
+	if len(messages) == 0 {
+		return ""
+	}
+
+	transcript := detailSessionMessages(messages, toolFeedbackMaxArgsLength)
+	entries := make([]string, 0, len(transcript))
+	for _, msg := range transcript {
+		if msg.Role != "user" && msg.Role != "assistant" {
+			continue
+		}
+		if msg.Role == "assistant" && msg.Kind != "" && msg.Kind != "normal" {
+			continue
+		}
+
+		content := strings.TrimSpace(msg.Content)
+		if content == "" {
+			content = sessionChatMessagePreview(msg)
+		}
+		if content == "" {
+			continue
+		}
+		content = truncateRunes(content, maxSummaryEntryRunes)
+		entries = append(entries, msg.Role+": "+content)
+	}
+	if len(entries) == 0 {
+		return ""
+	}
+
+	// Always reserve room for the omission notice so the result remains within
+	// the configured cap even when only part of the archive can be represented.
+	remaining := maxRebuiltSummaryRunes -
+		len([]rune(rebuiltArchiveSummaryHeader)) -
+		len([]rune(rebuiltArchiveOmittedNotice)) - 3
+	selectedReversed := make([]string, 0, len(entries))
+	omitted := false
+	for index := len(entries) - 1; index >= 0; index-- {
+		entryRunes := len([]rune(entries[index])) + 1
+		if entryRunes > remaining {
+			omitted = true
+			break
+		}
+		selectedReversed = append(selectedReversed, entries[index])
+		remaining -= entryRunes
+	}
+	if len(selectedReversed) == 0 {
+		return rebuiltArchiveSummaryHeader
+	}
+
+	var builder strings.Builder
+	builder.WriteString(rebuiltArchiveSummaryHeader)
+	builder.WriteByte('\n')
+	if omitted {
+		builder.WriteString(rebuiltArchiveOmittedNotice)
+		builder.WriteByte('\n')
+	}
+	for index := len(selectedReversed) - 1; index >= 0; index-- {
+		builder.WriteString(selectedReversed[index])
+		if index > 0 {
+			builder.WriteByte('\n')
+		}
+	}
+	return builder.String()
+}
+
+// handleDeleteMessageSeries removes the complete raw message series ending at
+// a visible user or normal assistant transcript entry.
+//
+//	DELETE /api/sessions/{id}/message-series?transcript_index=3
+func (h *Handler) handleDeleteMessageSeries(w http.ResponseWriter, r *http.Request) {
+	sessionID := strings.TrimSpace(r.PathValue("id"))
+	if sessionID == "" {
+		http.Error(w, "missing session id", http.StatusBadRequest)
+		return
+	}
+
+	transcriptIndex, err := strconv.Atoi(r.URL.Query().Get("transcript_index"))
+	if err != nil || transcriptIndex < 0 {
+		http.Error(w, "invalid transcript_index", http.StatusBadRequest)
+		return
+	}
+
+	dir, toolFeedbackMaxArgsLength, err := h.sessionRuntimeSettings()
+	if err != nil {
+		http.Error(w, "failed to resolve sessions directory", http.StatusInternalServerError)
+		return
+	}
+
+	if ref, refErr := h.findPicoJSONLSession(dir, sessionID); refErr == nil {
+		sess, readErr := h.readJSONLSession(dir, ref.Key)
+		if readErr != nil {
+			http.Error(w, "failed to read session", http.StatusInternalServerError)
+			return
+		}
+
+		start, end, ok := rawMessageRangeForTranscriptIndex(
+			sess.Messages,
+			transcriptIndex,
+			toolFeedbackMaxArgsLength,
+		)
+		if !ok {
+			http.Error(w, "transcript_index is not a deletable message boundary", http.StatusBadRequest)
+			return
+		}
+
+		remaining := make([]providers.Message, 0, len(sess.Messages)-(end-start))
+		remaining = append(remaining, sess.Messages[:start]...)
+		remaining = append(remaining, sess.Messages[end:]...)
+
+		archivedDeleted := rawRangeOverlap(start, end, 0, sess.ArchivedRawCount)
+		activeDeleted := rawRangeOverlap(start, end, sess.ArchivedRawCount, len(sess.Messages))
+		newArchivedCount := sess.ArchivedRawCount - archivedDeleted
+		archived := append([]providers.Message(nil), remaining[:newArchivedCount]...)
+		active := append([]providers.Message(nil), remaining[newArchivedCount:]...)
+
+		store, storeErr := memory.NewJSONLStore(dir)
+		if storeErr != nil {
+			http.Error(w, "failed to open session store", http.StatusInternalServerError)
+			return
+		}
+		if activeDeleted > 0 {
+			if err := store.SetHistory(r.Context(), ref.Key, active); err != nil {
+				http.Error(w, "failed to update session history", http.StatusInternalServerError)
+				return
+			}
+		}
+		if archivedDeleted > 0 {
+			if err := store.ReplaceArchivedMessages(r.Context(), ref.Key, archived); err != nil {
+				http.Error(w, "failed to update archived history", http.StatusInternalServerError)
+				return
+			}
+			rebuiltSummary := rebuildArchivedSummary(archived, toolFeedbackMaxArgsLength)
+			if err := store.SetSummary(r.Context(), ref.Key, rebuiltSummary); err != nil {
+				http.Error(w, "failed to rebuild session summary", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		if err := h.reconcileEditedSessionContext(r.Context(), dir, ref.Key, active); err != nil {
+			http.Error(w, "failed to reconcile session context", http.StatusInternalServerError)
+			return
+		}
+
+		updated, readErr := h.readJSONLSession(dir, ref.Key)
+		if readErr != nil {
+			http.Error(w, "failed to reload session", http.StatusInternalServerError)
+			return
+		}
+		response := h.buildSessionDetailResponse(sessionID, updated, toolFeedbackMaxArgsLength)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+		return
+	} else if !errors.Is(refErr, os.ErrNotExist) {
+		http.Error(w, "failed to find session", http.StatusInternalServerError)
+		return
+	}
+
+	legacyRef, legacyErr := h.findLegacyPicoSession(dir, sessionID)
+	if legacyErr != nil {
+		if errors.Is(legacyErr, os.ErrNotExist) {
+			http.Error(w, "session not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "failed to find session", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	sess, err := h.readLegacySession(legacyRef.Path)
+	if err != nil {
+		http.Error(w, "failed to read session", http.StatusInternalServerError)
+		return
+	}
+	start, end, ok := rawMessageRangeForTranscriptIndex(
+		sess.Messages,
+		transcriptIndex,
+		toolFeedbackMaxArgsLength,
+	)
+	if !ok {
+		http.Error(w, "transcript_index is not a deletable message boundary", http.StatusBadRequest)
+		return
+	}
+
+	remaining := make([]providers.Message, 0, len(sess.Messages)-(end-start))
+	remaining = append(remaining, sess.Messages[:start]...)
+	remaining = append(remaining, sess.Messages[end:]...)
+	sess.Messages = remaining
+	if strings.TrimSpace(sess.Summary) != "" {
+		sess.Summary = rebuildArchivedSummary(remaining, toolFeedbackMaxArgsLength)
+	}
+	sess.Updated = time.Now()
+	data, err := json.MarshalIndent(sess, "", "  ")
+	if err != nil {
+		http.Error(w, "failed to encode session", http.StatusInternalServerError)
+		return
+	}
+	if err := fileutil.WriteFileAtomic(legacyRef.Path, data, 0o600); err != nil {
+		http.Error(w, "failed to update session history", http.StatusInternalServerError)
+		return
+	}
+	if err := h.reconcileEditedSessionContext(r.Context(), dir, sess.Key, remaining); err != nil {
+		http.Error(w, "failed to reconcile session context", http.StatusInternalServerError)
+		return
+	}
+
+	response := h.buildSessionDetailResponse(sessionID, sess, toolFeedbackMaxArgsLength)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
 // handleForkSession creates a new session with messages from an existing session up to a specific transcript index.
 //
 //	POST /api/sessions/{id}/fork
@@ -1477,23 +1829,19 @@ func (h *Handler) handleForkSession(w http.ResponseWriter, r *http.Request) {
 	// The transcript index refers to the position in the detail-session-messages
 	// output (which includes thoughts), matching what GET /api/sessions/{id}
 	// returns to the frontend.
-	rawCount := rawMessageIndexForTranscriptIndex(sess.Messages, req.TranscriptIndex, toolFeedbackMaxArgsLength)
+	fullTranscript := detailSessionMessages(sess.Messages, toolFeedbackMaxArgsLength)
+	if req.TranscriptIndex >= len(fullTranscript) ||
+		!forkableTranscriptMessage(fullTranscript[req.TranscriptIndex]) {
+		http.Error(w, "cannot fork at a thought or tool-call message", http.StatusBadRequest)
+		return
+	}
+	rawCount := safeRawBoundaryForTranscriptIndex(
+		sess.Messages,
+		req.TranscriptIndex,
+		toolFeedbackMaxArgsLength,
+	)
 	if rawCount <= 0 {
 		http.Error(w, "transcript_index out of range", http.StatusBadRequest)
-		return
-	}
-
-	// Validate that the fork point is at a user message or an assistant
-	// "normal" reply. Forking at thought/tool-call boundaries is not allowed
-	// because those are internal details, not meaningful conversation boundaries.
-	transcript := detailSessionMessages(sess.Messages[:rawCount], toolFeedbackMaxArgsLength)
-	if len(transcript) == 0 {
-		http.Error(w, "no messages at transcript_index", http.StatusBadRequest)
-		return
-	}
-	lastMsg := transcript[len(transcript)-1]
-	if lastMsg.Role == "assistant" && lastMsg.Kind != "" && lastMsg.Kind != "normal" {
-		http.Error(w, "cannot fork at a thought or tool-call message", http.StatusBadRequest)
 		return
 	}
 

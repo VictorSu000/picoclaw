@@ -1,10 +1,11 @@
 import { getDefaultStore } from "jotai"
 import { toast } from "sonner"
 
-import { forkSession } from "@/api/sessions"
+import { deleteMessageSeries, forkSession } from "@/api/sessions"
 import {
   loadSessionMessages,
   mergeHistoryMessages,
+  sessionDetailToLoadedHistory,
 } from "@/features/chat/history"
 import { type PicoMessage, handlePicoMessage } from "@/features/chat/protocol"
 import {
@@ -464,24 +465,10 @@ export async function newChatSession() {
   }
 }
 
-/**
- * Fork the current chat session at the given visible-message index.
- *
- * The visible index is mapped to a transcript index (position in the
- * detail-session-messages output that GET /api/sessions/{id} returns).
- * The backend then maps the transcript index back to the raw persisted
- * message boundary, ensuring the fork point is always correct regardless
- * of how raw messages expand into transcript entries.
- */
-export async function forkChatSession(visibleIndex: number) {
-  const sourceSessionId = activeSessionIdRef
+function transcriptIndexForVisibleMessage(visibleIndex: number): number {
   const allMessages = getChatState().messages
   const detailVisibility = store.get(assistantDetailVisibilityAtom)
 
-  // visibleIndex points to the message AFTER the fork point in the filtered
-  // visible list. Find the transcript index (position in allMessages) of the
-  // last message to include (the one at visibleIndex-1 in the filtered list).
-  let transcriptIndex = -1
   let visibleCount = 0
   for (let i = 0; i < allMessages.length; i++) {
     const msg = allMessages[i]
@@ -489,13 +476,27 @@ export async function forkChatSession(visibleIndex: number) {
       msg.role === "user" ||
       shouldShowAssistantMessage(detailVisibility, msg.kind)
     ) {
-      if (visibleCount === visibleIndex - 1) {
-        transcriptIndex = i
-        break
+      if (visibleCount === visibleIndex) {
+        return i
       }
       visibleCount++
     }
   }
+
+  return -1
+}
+
+/**
+ * Fork the current chat session after the given visible message.
+ *
+ * The visible index is mapped to a transcript index (position in the
+ * detail-session-messages output that GET /api/sessions/{id} returns).
+ * The backend then maps the transcript index back to a safe raw persisted
+ * message boundary.
+ */
+export async function forkChatSession(visibleIndex: number) {
+  const sourceSessionId = activeSessionIdRef
+  const transcriptIndex = transcriptIndexForVisibleMessage(visibleIndex)
 
   if (transcriptIndex < 0) {
     throw new Error("Invalid fork position")
@@ -540,6 +541,37 @@ export async function forkChatSession(visibleIndex: number) {
     console.error("Failed to load forked session history:", error)
     toast.error(i18n.t("chat.historyOpenFailed"))
   }
+}
+
+/** Delete the complete persisted message series ending at a visible message. */
+export async function deleteChatMessageSeries(visibleIndex: number) {
+  const sourceSessionId = activeSessionIdRef
+  const transcriptIndex = transcriptIndexForVisibleMessage(visibleIndex)
+  if (transcriptIndex < 0) {
+    throw new Error("Invalid message deletion position")
+  }
+
+  const detail = await deleteMessageSeries(sourceSessionId, transcriptIndex)
+  if (activeSessionIdRef !== sourceSessionId) {
+    return
+  }
+
+  const {
+    messages,
+    summary,
+    archivedCount,
+    agentPresetName,
+    effectiveModelName,
+  } = sessionDetailToLoadedHistory(detail)
+  updateChatStore({
+    messages,
+    isTyping: false,
+    contextUsage: undefined,
+    sessionSummary: summary,
+    archivedMessageCount: archivedCount,
+    agentPresetName,
+    effectiveModelName,
+  })
 }
 
 export function initializeChatStore() {
