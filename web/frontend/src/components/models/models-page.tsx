@@ -1,6 +1,7 @@
 import {
   IconDatabase,
   IconLoader2,
+  IconPhoto,
   IconPlus,
   IconStar,
 } from "@tabler/icons-react"
@@ -13,9 +14,17 @@ import {
   type ModelProviderOption,
   getModels,
   setDefaultModel,
+  setVisionFallbackModel,
 } from "@/api/models"
 import { PageHeader } from "@/components/page-header"
 import { Button } from "@/components/ui/button"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { showSaveSuccessOrRestartToast } from "@/lib/restart-required"
 import { refreshGatewayState } from "@/store/gateway"
 
@@ -27,8 +36,8 @@ import {
   getCanonicalProviderKey,
   getProviderCatalogMap,
 } from "./provider-registry"
-import { ProviderSection } from "./provider-section"
 import type { ProviderCatalogEntry } from "./provider-registry"
+import { ProviderSection } from "./provider-section"
 
 interface ProviderGroup {
   key: string
@@ -41,11 +50,13 @@ interface ProviderGroup {
 export function ModelsPage() {
   const { t } = useTranslation()
   const [models, setModels] = useState<ModelInfo[]>([])
-  const [providerOptions, setProviderOptions] = useState<
-    ModelProviderOption[]
-  >([])
+  const [providerOptions, setProviderOptions] = useState<ModelProviderOption[]>(
+    [],
+  )
   const [loading, setLoading] = useState(true)
   const [fetchError, setFetchError] = useState("")
+  const [visionFallbackModel, setVisionFallbackModelName] = useState("")
+  const [settingVisionFallback, setSettingVisionFallback] = useState(false)
 
   const [editingModel, setEditingModel] = useState<ModelInfo | null>(null)
   const [deletingModel, setDeletingModel] = useState<ModelInfo | null>(null)
@@ -68,6 +79,7 @@ export function ModelsPage() {
         return a.model_name.localeCompare(b.model_name)
       })
       setModels(sorted)
+      setVisionFallbackModelName(data.vision_fallback_model || "")
       setProviderOptions(data.provider_options || [])
       setFetchError("")
     } catch (e) {
@@ -102,9 +114,37 @@ export function ModelsPage() {
     }
   }
 
+  const handleSetVisionFallback = async (value: string) => {
+    const modelName = value === "__none__" ? "" : value
+    if (modelName === visionFallbackModel) return
+
+    setSettingVisionFallback(true)
+    try {
+      await setVisionFallbackModel(modelName)
+      await fetchModels()
+      const gateway = await refreshGatewayState({ force: true })
+      showSaveSuccessOrRestartToast(
+        t,
+        t("models.visionFallback.saveSuccess"),
+        modelName || t("models.visionFallback.none"),
+        gateway?.restartRequired === true,
+      )
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("models.loadError"))
+    } finally {
+      setSettingVisionFallback(false)
+    }
+  }
+
   const grouped: Record<
     string,
-    { provider: Pick<ProviderCatalogEntry, "key" | "label" | "iconSlug" | "domain">; models: ModelInfo[] }
+    {
+      provider: Pick<
+        ProviderCatalogEntry,
+        "key" | "label" | "iconSlug" | "domain"
+      >
+      models: ModelInfo[]
+    }
   > = {}
   for (const model of models) {
     const providerKey = getCanonicalProviderKey(model.provider, providerOptions)
@@ -154,6 +194,22 @@ export function ModelsPage() {
     })
 
   const defaultModel = models.find((model) => model.is_default)
+  const visionFallbackOptions = models.filter((model, index, all) => {
+    const hasVisionTag = model.tags?.some(
+      (tag) => tag.trim().toLowerCase() === "vision",
+    )
+    const isConfiguredFallback = model.model_name === visionFallbackModel
+    const firstWithName = all.findIndex(
+      (candidate) => candidate.model_name === model.model_name,
+    )
+    return (
+      (hasVisionTag || isConfiguredFallback) &&
+      !model.is_virtual &&
+      model.default_model_allowed !== false &&
+      (model.available || isConfiguredFallback) &&
+      firstWithName === index
+    )
+  })
 
   return (
     <div className="flex h-full flex-col">
@@ -192,6 +248,46 @@ export function ModelsPage() {
           <p className="text-muted-foreground mt-1 text-sm">
             {t("models.description")}
           </p>
+          <div className="border-border/60 bg-card mt-4 flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-start gap-2.5">
+              <IconPhoto className="text-muted-foreground mt-0.5 size-4 shrink-0" />
+              <div>
+                <p className="text-sm font-medium">
+                  {t("models.visionFallback.label")}
+                </p>
+                <p className="text-muted-foreground text-xs leading-relaxed">
+                  {t("models.visionFallback.description")}
+                </p>
+              </div>
+            </div>
+            <Select
+              value={visionFallbackModel || "__none__"}
+              onValueChange={(value) => void handleSetVisionFallback(value)}
+              disabled={loading || settingVisionFallback}
+            >
+              <SelectTrigger className="w-full sm:w-64">
+                {settingVisionFallback && (
+                  <IconLoader2 className="size-3.5 animate-spin" />
+                )}
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">
+                  {t("models.visionFallback.none")}
+                </SelectItem>
+                {visionFallbackOptions.map((model) => (
+                  <SelectItem key={model.model_name} value={model.model_name}>
+                    {model.model_name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {!loading && visionFallbackOptions.length === 0 && (
+            <p className="text-muted-foreground mt-1 text-xs">
+              {t("models.visionFallback.noOptions")}
+            </p>
+          )}
           {!loading && providerOptions.length === 0 && (
             <p className="text-muted-foreground mt-1 text-sm">
               {t("models.providerCatalogUnavailable")}

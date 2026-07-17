@@ -268,6 +268,13 @@
     "providerCatalogUnavailable": "O catálogo de providers do backend está indisponível. A seleção de novos providers fica desabilitada até a API de Modelos carregar com sucesso.",
     "noDefaultHintPrefix": "Nenhum modelo padrão definido ainda. Clique em",
     "noDefaultHintSuffix": "para definir um.",
+    "visionFallback": {
+      "label": "Modelo visual de fallback",
+      "description": "Usado somente quando image_model não está configurado e o modelo principal ativo não possui a tag vision.",
+      "none": "Não configurado",
+      "noOptions": "Adicione a tag vision a um modelo disponível para selecioná-lo aqui.",
+      "saveSuccess": "Modelo visual de fallback atualizado."
+    },
     "status": {
       "available": "Disponível",
       "unconfigured": "Não configurado",
@@ -275,7 +282,8 @@
     },
     "badge": {
       "default": "Padrão",
-      "virtual": "Virtual"
+      "virtual": "Virtual",
+      "visionFallback": "Fallback visual"
     },
     "action": {
       "edit": "Editar API Key",
@@ -327,6 +335,9 @@
       "providerHint": "Escolha um provider do catálogo do backend; o Identificador do Modelo será interpretado como o ID canônico desse provider.",
       "providerInvalid": "O provider atual é inválido. Selecione um provider suportado.",
       "selectProviderFirst": "Selecione um provider primeiro",
+      "tags": "Tags",
+      "tagsHint": "Tags de capacidade separadas por vírgulas. Adicione vision quando o modelo aceitar imagens.",
+      "tagsPlaceholder": "ex: vision",
       "apiBase": "URL Base da API",
       "apiKey": "API Key",
       "apiKeyPlaceholder": "Digite sua API Key",

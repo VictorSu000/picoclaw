@@ -414,6 +414,14 @@ func computeConfigSignature(cfg *config.Config) string {
 	if defaultModel != "" {
 		parts = append(parts, "model:"+defaultModel)
 	}
+	imageModel := strings.TrimSpace(cfg.Agents.Defaults.ImageModel)
+	if imageModel != "" {
+		parts = append(parts, "image_model:"+imageModel)
+	}
+	visionFallbackModel := strings.TrimSpace(cfg.Agents.Defaults.VisionFallbackModel)
+	if visionFallbackModel != "" {
+		parts = append(parts, "vision_fallback:"+visionFallbackModel)
+	}
 	modelStreamingSignatures := computeModelStreamingSignatures(cfg)
 	if len(modelStreamingSignatures) > 0 {
 		parts = append(parts, "model_streaming:"+strings.Join(modelStreamingSignatures, ","))
@@ -506,6 +514,11 @@ func computeModelStreamingSignatures(cfg *config.Config) []string {
 	}
 	names := []string{strings.TrimSpace(cfg.Agents.Defaults.GetModelName())}
 	names = append(names, cfg.Agents.Defaults.ModelFallbacks...)
+	names = append(names, strings.TrimSpace(cfg.Agents.Defaults.ImageModel))
+	names = append(names, cfg.Agents.Defaults.ImageModelFallbacks...)
+	if visionFallbackModel := strings.TrimSpace(cfg.Agents.Defaults.VisionFallbackModel); visionFallbackModel != "" {
+		names = append(names, visionFallbackModel)
+	}
 	if cfg.Agents.Defaults.Routing != nil {
 		names = append(names, cfg.Agents.Defaults.Routing.LightModel)
 	}
@@ -515,6 +528,13 @@ func computeModelStreamingSignatures(cfg *config.Config) []string {
 		}
 		names = append(names, agent.Model.Primary)
 		names = append(names, agent.Model.Fallbacks...)
+	}
+	for _, preset := range cfg.AgentPresets {
+		if preset.Model == nil {
+			continue
+		}
+		names = append(names, preset.Model.Primary)
+		names = append(names, preset.Model.Fallbacks...)
 	}
 
 	seenNames := make(map[string]bool)
@@ -528,12 +548,21 @@ func computeModelStreamingSignatures(cfg *config.Config) []string {
 		seenNames[name] = true
 		for _, match := range modelConfigsMatchingSignatureRef(cfg.ModelList, name, defaultProvider) {
 			mc := match.model
+			tags := make([]string, 0, len(mc.Tags))
+			for _, tag := range mc.Tags {
+				tag = strings.ToLower(strings.TrimSpace(tag))
+				if tag != "" {
+					tags = append(tags, tag)
+				}
+			}
+			sort.Strings(tags)
 			entry := strings.Join([]string{
 				name,
 				strconv.Itoa(match.index),
 				strings.TrimSpace(mc.Provider),
 				strings.TrimSpace(mc.Model),
 				strconv.FormatBool(mc.Streaming.Enabled),
+				strings.Join(tags, "+"),
 			}, ":")
 			if seenEntries[entry] {
 				continue

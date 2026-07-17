@@ -41,6 +41,7 @@ import {
   getSubmittedAPIBase,
   normalizeApiBase,
 } from "./model-provider-form-shared"
+import { parseModelTags } from "./model-tags"
 import { type FieldValidation, validateModelField } from "./model-validation"
 import { ProviderCombobox } from "./provider-combobox"
 import {
@@ -58,6 +59,7 @@ interface AddForm {
   modelName: string
   provider: string
   model: string
+  tags: string
   apiBase: string
   apiKey: string
   proxy: string
@@ -78,6 +80,7 @@ const EMPTY_ADD_FORM: AddForm = {
   modelName: "",
   provider: "",
   model: "",
+  tags: "",
   apiBase: "",
   apiKey: "",
   proxy: "",
@@ -386,6 +389,7 @@ export function AddModelSheet({
         model_name: modelName,
         provider: provider || undefined,
         model: modelId,
+        tags: parseModelTags(form.tags),
         api_base: submittedApiBase,
         api_key: form.apiKey.trim() || undefined,
         proxy: form.proxy.trim() || undefined,
@@ -587,6 +591,17 @@ export function AddModelSheet({
                     </span>
                   )}
                 </div>
+              </Field>
+
+              <Field
+                label={t("models.field.tags")}
+                hint={t("models.field.tagsHint")}
+              >
+                <Input
+                  value={form.tags}
+                  onChange={setField("tags")}
+                  placeholder={t("models.field.tagsPlaceholder")}
+                />
               </Field>
 
               {!isOAuth && (

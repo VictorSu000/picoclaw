@@ -836,6 +836,38 @@ Resolution rules:
 - If `provider` is omitted, PicoClaw treats the first `/` segment in `model` as the provider and everything after that first `/` as the runtime model ID.
 - This means `"model": "openrouter/openai/gpt-5.4"` still works as a compatibility form and sends `openai/gpt-5.4` to OpenRouter.
 
+#### Vision Input Routing
+
+Add the `vision` tag to models that accept image input. `agents.defaults.vision_fallback_model` is the conditional fallback: media turns keep using the active primary model when it has the `vision` tag, and switch to `vision_fallback_model` only when the primary lacks that tag.
+
+`agents.defaults.image_model` keeps its dedicated-override behavior. When it is configured, every media turn uses `image_model` regardless of the primary model's tags; `image_model_fallbacks` remains its failover chain. This override takes precedence over `vision_fallback_model`.
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "model_name": "text-model",
+      "vision_fallback_model": "vision-model"
+    }
+  },
+  "model_list": [
+    {
+      "model_name": "text-model",
+      "provider": "openai",
+      "model": "text-model"
+    },
+    {
+      "model_name": "vision-model",
+      "provider": "openai",
+      "model": "vision-model",
+      "tags": ["vision"]
+    }
+  ]
+}
+```
+
+The fallback model itself must carry the `vision` tag when it is selected through the WebUI.
+
 #### Streaming Configuration
 
 Provider streaming uses a double opt-in and is disabled by default. The agent only tries streaming when the current channel has `settings.streaming.enabled: true`, the active model entry has `streaming.enabled: true`, and both the provider and channel support streaming. If any condition is missing, PicoClaw uses the normal non-streaming request path.

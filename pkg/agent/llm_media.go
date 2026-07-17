@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/providers"
 )
@@ -71,27 +72,27 @@ func isVisionUnsupportedError(err error) bool {
 	return false
 }
 
-func visionUnsupportedModelError(modelName string, imageModelConfigured bool) error {
+func visionUnsupportedModelError(modelName string, visionModelConfigured bool) error {
 	modelName = strings.TrimSpace(modelName)
-	if imageModelConfigured {
+	if visionModelConfigured {
 		if modelName != "" {
 			return fmt.Errorf(
-				"selected vision model %q does not support image input; update agents.defaults.image_model to a multimodal model",
+				"selected vision model %q does not support image input; update agents.defaults.image_model or agents.defaults.vision_fallback_model",
 				modelName,
 			)
 		}
 		return fmt.Errorf(
-			"selected vision model does not support image input; update agents.defaults.image_model to a multimodal model",
+			"selected vision model does not support image input; update agents.defaults.image_model or agents.defaults.vision_fallback_model",
 		)
 	}
 	if modelName != "" {
 		return fmt.Errorf(
-			"active model %q does not support image input; configure agents.defaults.image_model with a multimodal model",
+			"active model %q does not support image input; add the vision tag or configure agents.defaults.vision_fallback_model",
 			modelName,
 		)
 	}
 	return fmt.Errorf(
-		"the active model does not support image input; configure agents.defaults.image_model with a multimodal model",
+		"the active model does not support image input; add the vision tag or configure agents.defaults.vision_fallback_model",
 	)
 }
 
@@ -119,21 +120,50 @@ func messagesContainCurrentTurnMediaTurn(messages []providers.Message) bool {
 	return false
 }
 
+func modelSupportsVision(model *config.ModelConfig) bool {
+	return model != nil && model.HasTag(config.ModelTagVision)
+}
+
+func (p *Pipeline) primaryModelConfig(ts *turnState) *config.ModelConfig {
+	if p == nil || p.Cfg == nil || ts == nil || ts.agent == nil {
+		return nil
+	}
+	model := resolvedCandidateModel(ts.agent.Candidates, ts.agent.Model)
+	return resolveActiveModelConfig(
+		p.Cfg,
+		ts.agent.Workspace,
+		ts.agent.Candidates,
+		model,
+		p.Cfg.Agents.Defaults.Provider,
+	)
+}
+
 func (p *Pipeline) routeMediaTurn(ts *turnState, exec *turnExecution) error {
-	if p == nil || ts == nil || ts.agent == nil || exec == nil ||
+	if p == nil || p.Cfg == nil || ts == nil || ts.agent == nil || exec == nil ||
 		!messagesContainCurrentTurnMediaTurn(currentTurnMessages(exec.callMessages, exec.currentTurnStart)) {
 		return nil
 	}
-
 	var targetCandidates []providers.FallbackCandidate
 	var targetModelName string
 	var routeReason string
 
 	switch {
 	case len(ts.agent.ImageCandidates) > 0:
+		// image_model keeps its original dedicated-override semantics and takes
+		// precedence even when the primary model is vision-capable.
 		targetCandidates = append([]providers.FallbackCandidate(nil), ts.agent.ImageCandidates...)
 		targetModelName = strings.TrimSpace(p.Cfg.Agents.Defaults.ImageModel)
 		routeReason = "configured_image_model"
+	case !exec.usedLight && modelSupportsVision(exec.activeModelConfig):
+		return nil
+	case exec.usedLight && modelSupportsVision(p.primaryModelConfig(ts)) && len(ts.agent.Candidates) > 0:
+		targetCandidates = append([]providers.FallbackCandidate(nil), ts.agent.Candidates...)
+		targetModelName = strings.TrimSpace(ts.agent.Model)
+		routeReason = "bypass_light_model_for_media"
+	case len(ts.agent.VisionFallbackCandidates) > 0:
+		targetCandidates = append([]providers.FallbackCandidate(nil), ts.agent.VisionFallbackCandidates...)
+		targetModelName = strings.TrimSpace(p.Cfg.Agents.Defaults.VisionFallbackModel)
+		routeReason = "configured_vision_fallback"
 	case exec.usedLight && len(ts.agent.Candidates) > 0:
 		targetCandidates = append([]providers.FallbackCandidate(nil), ts.agent.Candidates...)
 		targetModelName = strings.TrimSpace(ts.agent.Model)

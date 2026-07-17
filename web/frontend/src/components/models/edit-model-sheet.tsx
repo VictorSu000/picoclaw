@@ -42,6 +42,7 @@ import {
   getSubmittedAPIBase,
   normalizeApiBase,
 } from "./model-provider-form-shared"
+import { parseModelTags } from "./model-tags"
 import { type FieldValidation, validateModelField } from "./model-validation"
 import { ProviderCombobox } from "./provider-combobox"
 import {
@@ -58,6 +59,7 @@ import { TestModelDialog } from "./test-model-dialog"
 interface EditForm {
   provider: string
   modelId: string
+  tags: string
   apiKey: string
   apiBase: string
   proxy: string
@@ -86,6 +88,7 @@ function buildInitialEditForm(model: ModelInfo): EditForm {
   return {
     provider: getCanonicalProviderKey(model.provider),
     modelId: model.model,
+    tags: (model.tags ?? []).join(", "),
     apiKey: "",
     apiBase: model.api_base ?? "",
     proxy: model.proxy ?? "",
@@ -118,6 +121,7 @@ export function EditModelSheet({
   const [form, setForm] = useState<EditForm>({
     provider: "",
     modelId: "",
+    tags: "",
     apiKey: "",
     apiBase: "",
     proxy: "",
@@ -369,6 +373,7 @@ export function EditModelSheet({
         model_name: model.model_name,
         provider: provider,
         model: modelId,
+        tags: parseModelTags(form.tags),
         api_base: submittedApiBase,
         api_key: form.apiKey.trim() || undefined,
         proxy: form.proxy.trim() || undefined,
@@ -552,6 +557,17 @@ export function EditModelSheet({
                     </Button>
                   )}
                 </div>
+              </Field>
+
+              <Field
+                label={t("models.field.tags")}
+                hint={t("models.field.tagsHint")}
+              >
+                <Input
+                  value={form.tags}
+                  onChange={setField("tags")}
+                  placeholder={t("models.field.tagsPlaceholder")}
+                />
               </Field>
 
               {!isOAuth && (

@@ -98,6 +98,11 @@ export function ModelCard({
               {t("models.badge.virtual")}
             </span>
           )}
+          {model.is_vision_fallback && (
+            <span className="shrink-0 rounded bg-blue-500/10 px-1.5 py-0.5 text-[10px] leading-none font-medium text-blue-600 dark:text-blue-400">
+              {t("models.badge.visionFallback")}
+            </span>
+          )}
         </div>
 
         <div className="flex shrink-0 items-center gap-0.5">
@@ -194,6 +199,19 @@ export function ModelCard({
       <p className="text-muted-foreground truncate font-mono text-xs leading-snug">
         {model.model}
       </p>
+
+      {(model.tags?.length ?? 0) > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {model.tags?.map((tag) => (
+            <span
+              key={tag}
+              className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px] leading-none"
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+      )}
 
       <div className="flex items-center gap-2">
         {isOAuth ? (

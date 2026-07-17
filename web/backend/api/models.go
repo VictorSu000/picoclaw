@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,6 +27,7 @@ func (h *Handler) registerModelRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/models/catalog/{id}", h.handleDeleteCatalog)
 	mux.HandleFunc("POST /api/models", h.handleAddModel)
 	mux.HandleFunc("POST /api/models/default", h.handleSetDefaultModel)
+	mux.HandleFunc("POST /api/models/vision-fallback", h.handleSetVisionFallbackModel)
 	mux.HandleFunc("PUT /api/models/{index}", h.handleUpdateModel)
 	mux.HandleFunc("DELETE /api/models/{index}", h.handleDeleteModel)
 	mux.HandleFunc("POST /api/models/{index}/test", h.handleTestModel)
@@ -35,14 +37,15 @@ func (h *Handler) registerModelRoutes(mux *http.ServeMux) {
 // modelResponse is the JSON structure returned for each model in the list.
 // All ModelConfig fields are included so the frontend can display and edit them.
 type modelResponse struct {
-	Index      int    `json:"index"`
-	ModelName  string `json:"model_name"`
-	Provider   string `json:"provider,omitempty"`
-	Model      string `json:"model"`
-	APIBase    string `json:"api_base,omitempty"`
-	APIKey     string `json:"api_key"`
-	Proxy      string `json:"proxy,omitempty"`
-	AuthMethod string `json:"auth_method,omitempty"`
+	Index      int      `json:"index"`
+	ModelName  string   `json:"model_name"`
+	Provider   string   `json:"provider,omitempty"`
+	Model      string   `json:"model"`
+	Tags       []string `json:"tags,omitempty"`
+	APIBase    string   `json:"api_base,omitempty"`
+	APIKey     string   `json:"api_key"`
+	Proxy      string   `json:"proxy,omitempty"`
+	AuthMethod string   `json:"auth_method,omitempty"`
 	// Advanced fields
 	ConnectMode         string                      `json:"connect_mode,omitempty"`
 	Workspace           string                      `json:"workspace,omitempty"`
@@ -60,7 +63,31 @@ type modelResponse struct {
 	Status              string `json:"status"`
 	IsDefault           bool   `json:"is_default"`
 	IsVirtual           bool   `json:"is_virtual"`
+	IsVisionFallback    bool   `json:"is_vision_fallback"`
 	DefaultModelAllowed bool   `json:"default_model_allowed"`
+}
+
+func normalizeModelTags(tags []string) []string {
+	if len(tags) == 0 {
+		return nil
+	}
+	normalized := make([]string, 0, len(tags))
+	seen := make(map[string]struct{}, len(tags))
+	for _, tag := range tags {
+		tag = strings.ToLower(strings.TrimSpace(tag))
+		if tag == "" {
+			continue
+		}
+		if _, exists := seen[tag]; exists {
+			continue
+		}
+		seen[tag] = struct{}{}
+		normalized = append(normalized, tag)
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
 }
 
 func normalizeStoredModelConfig(mc *config.ModelConfig) bool {
@@ -82,6 +109,11 @@ func normalizeStoredModelConfig(mc *config.ModelConfig) bool {
 	authMethod := strings.ToLower(strings.TrimSpace(mc.AuthMethod))
 	if authMethod != mc.AuthMethod {
 		mc.AuthMethod = authMethod
+		changed = true
+	}
+	normalizedTags := normalizeModelTags(mc.Tags)
+	if !slices.Equal(normalizedTags, mc.Tags) {
+		mc.Tags = normalizedTags
 		changed = true
 	}
 
@@ -134,6 +166,7 @@ func normalizeIncomingModelConfig(mc *config.ModelConfig) {
 	mc.Model = strings.TrimSpace(mc.Model)
 	mc.Provider = strings.TrimSpace(mc.Provider)
 	mc.AuthMethod = strings.ToLower(strings.TrimSpace(mc.AuthMethod))
+	mc.Tags = normalizeModelTags(mc.Tags)
 	if mc.Provider == "" {
 		mc.Provider, mc.Model = providers.SplitModelProviderAndID(mc.Model, "openai")
 	} else {
@@ -250,6 +283,7 @@ func (h *Handler) handleListModels(w http.ResponseWriter, r *http.Request) {
 	normalizeStoredModelProviders(cfg)
 
 	defaultModel := cfg.Agents.Defaults.GetModelName()
+	visionFallbackModel := strings.TrimSpace(cfg.Agents.Defaults.VisionFallbackModel)
 	modelStatuses := make([]modelConfigurationSummary, len(cfg.ModelList))
 
 	var wg sync.WaitGroup
@@ -270,6 +304,7 @@ func (h *Handler) handleListModels(w http.ResponseWriter, r *http.Request) {
 			ModelName:           m.ModelName,
 			Provider:            provider,
 			Model:               modelID,
+			Tags:                append([]string(nil), m.Tags...),
 			APIBase:             m.APIBase,
 			APIKey:              maskAPIKey(m.APIKey()),
 			Proxy:               m.Proxy,
@@ -289,16 +324,18 @@ func (h *Handler) handleListModels(w http.ResponseWriter, r *http.Request) {
 			Status:              modelStatuses[i].Status,
 			IsDefault:           m.ModelName == defaultModel,
 			IsVirtual:           m.IsVirtual(),
+			IsVisionFallback:    m.ModelName == visionFallbackModel,
 			DefaultModelAllowed: defaultModelAllowedForModelConfig(m),
 		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"models":           models,
-		"total":            len(models),
-		"default_model":    defaultModel,
-		"provider_options": modelProviderOptionsForResponse(),
+		"models":                models,
+		"total":                 len(models),
+		"default_model":         defaultModel,
+		"vision_fallback_model": visionFallbackModel,
+		"provider_options":      modelProviderOptionsForResponse(),
 	})
 }
 
@@ -433,6 +470,9 @@ func (h *Handler) handleUpdateModel(w http.ResponseWriter, r *http.Request) {
 	if _, ok := rawFields["streaming"]; !ok {
 		mc.Streaming = cfg.ModelList[idx].Streaming
 	}
+	if _, ok := rawFields["tags"]; !ok {
+		mc.Tags = append([]string(nil), cfg.ModelList[idx].Tags...)
+	}
 	// Preserve the existing Provider when the caller omits it. This keeps the
 	// update API backward-compatible for clients that haven't started sending
 	// the new field yet, while still allowing explicit clearing via "".
@@ -468,11 +508,19 @@ func (h *Handler) handleUpdateModel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Validation error: %v", err), http.StatusBadRequest)
 		return
 	}
-	if cfg.Agents.Defaults.ModelName == cfg.ModelList[idx].ModelName &&
+	existingModelName := cfg.ModelList[idx].ModelName
+	if cfg.Agents.Defaults.ModelName == existingModelName &&
 		!defaultModelAllowedForModelConfig(&mc.ModelConfig) {
 		// Allow users to recover from legacy/invalid defaults by saving the model
 		// and clearing the default chat model reference in the same write.
 		cfg.Agents.Defaults.ModelName = ""
+	}
+	if cfg.Agents.Defaults.VisionFallbackModel == existingModelName {
+		if mc.HasTag(config.ModelTagVision) {
+			cfg.Agents.Defaults.VisionFallbackModel = mc.ModelName
+		} else {
+			cfg.Agents.Defaults.VisionFallbackModel = ""
+		}
 	}
 
 	cfg.ModelList[idx] = &mc.ModelConfig
@@ -517,6 +565,9 @@ func (h *Handler) handleDeleteModel(w http.ResponseWriter, r *http.Request) {
 	// If the deleted model was the default, clear it.
 	if cfg.Agents.Defaults.ModelName == deletedModelName {
 		cfg.Agents.Defaults.ModelName = ""
+	}
+	if cfg.Agents.Defaults.VisionFallbackModel == deletedModelName {
+		cfg.Agents.Defaults.VisionFallbackModel = ""
 	}
 
 	if err := config.SaveConfig(h.configPath, cfg); err != nil {
@@ -601,6 +652,73 @@ func (h *Handler) handleSetDefaultModel(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":        "ok",
 		"default_model": req.ModelName,
+	})
+}
+
+// handleSetVisionFallbackModel configures the model used only when image_model
+// is not configured and a media turn's primary model does not carry the vision
+// capability tag. An empty model_name clears the fallback.
+//
+//	POST /api/models/vision-fallback
+func (h *Handler) handleSetVisionFallbackModel(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	var req struct {
+		ModelName string `json:"model_name"`
+	}
+	if err = json.Unmarshal(body, &req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+	req.ModelName = strings.TrimSpace(req.ModelName)
+
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if req.ModelName != "" {
+		found := false
+		for _, model := range cfg.ModelList {
+			if model == nil || model.ModelName != req.ModelName {
+				continue
+			}
+			found = true
+			if model.IsVirtual() {
+				http.Error(w, fmt.Sprintf("Cannot use virtual model %q as the vision fallback", req.ModelName), http.StatusBadRequest)
+				return
+			}
+			if !defaultModelAllowedForModelConfig(model) {
+				http.Error(w, fmt.Sprintf("Model %q cannot be used as a chat model", req.ModelName), http.StatusBadRequest)
+				return
+			}
+			if !model.HasTag(config.ModelTagVision) {
+				http.Error(w, fmt.Sprintf("Model %q must have the %q tag", req.ModelName, config.ModelTagVision), http.StatusBadRequest)
+				return
+			}
+		}
+		if !found {
+			http.Error(w, fmt.Sprintf("Model %q not found in model_list", req.ModelName), http.StatusNotFound)
+			return
+		}
+	}
+
+	cfg.Agents.Defaults.VisionFallbackModel = req.ModelName
+	if err = config.SaveConfig(h.configPath, cfg); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to save config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":                "ok",
+		"vision_fallback_model": req.ModelName,
 	})
 }
 

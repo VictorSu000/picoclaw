@@ -628,6 +628,38 @@ Agent 读取 HEARTBEAT.md
 - 如果未设置 `provider`，PicoClaw 会把 `model` 第一个 `/` 之前的字段当作 provider，并把第一个 `/` 之后的全部内容当作最终模型 ID。
 - 这意味着 `"model": "openrouter/openai/gpt-5.4"` 这样的兼容写法仍然可用，并会把 `openai/gpt-5.4` 发送给 OpenRouter。
 
+#### 视觉输入路由
+
+为支持图片输入的模型添加 `vision` 标签。`agents.defaults.vision_fallback_model` 表示条件备用视觉模型：包含图片的消息在当前主模型带有 `vision` 标签时继续使用主模型，只有主模型不带该标签时才切换到 `vision_fallback_model`。
+
+`agents.defaults.image_model` 保持原有的专用覆盖语义：只要配置了它，所有包含媒体的消息都会使用 `image_model`，不判断主模型标签；`image_model_fallbacks` 仍是它的故障转移链。该覆盖的优先级高于 `vision_fallback_model`。
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "model_name": "text-model",
+      "vision_fallback_model": "vision-model"
+    }
+  },
+  "model_list": [
+    {
+      "model_name": "text-model",
+      "provider": "openai",
+      "model": "text-model"
+    },
+    {
+      "model_name": "vision-model",
+      "provider": "openai",
+      "model": "vision-model",
+      "tags": ["vision"]
+    }
+  ]
+}
+```
+
+通过 WebUI 选择备用视觉模型时，该模型本身必须带有 `vision` 标签。
+
 #### 流式输出配置
 
 Provider 流式输出采用双开关，默认关闭。只有当前 channel 的 `settings.streaming.enabled` 和当前模型条目的 `streaming.enabled` 都为 `true`，并且 provider 与 channel 都支持流式能力时，Agent 才会尝试流式请求；任一条件不满足时仍使用普通非流式请求。

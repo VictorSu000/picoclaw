@@ -272,6 +272,13 @@
     "providerCatalogUnavailable": "后端 Provider catalog 暂不可用，待模型 API 成功加载后才能选择新的 Provider。",
     "noDefaultHintPrefix": "尚未设置默认模型，点击",
     "noDefaultHintSuffix": "设为默认。",
+    "visionFallback": {
+      "label": "备用视觉模型",
+      "description": "仅当未配置 image_model，且当前主模型没有 vision 标签时使用。",
+      "none": "未配置",
+      "noOptions": "请先为一个可用模型添加 vision 标签，再在此选择。",
+      "saveSuccess": "备用视觉模型已更新。"
+    },
     "status": {
       "available": "可用",
       "unconfigured": "未配置",
@@ -279,7 +286,8 @@
     },
     "badge": {
       "default": "默认",
-      "virtual": "虚拟"
+      "virtual": "虚拟",
+      "visionFallback": "视觉备用"
     },
     "action": {
       "edit": "编辑 API Key",
@@ -330,6 +338,9 @@
       "providerPlaceholder": "请选择 Provider",
       "providerHint": "请选择一个由后端 catalog 提供的 Provider；“模型标识符”字段会按该 Provider 的规范模型 ID 解释。",
       "providerInvalid": "当前 Provider 无效，请重新选择一个受支持的 Provider。",
+      "tags": "标签",
+      "tagsHint": "以逗号分隔的模型能力标签。支持图片输入的模型请添加 vision。",
+      "tagsPlaceholder": "例如 vision",
       "apiBase": "API Base URL",
       "apiKey": "API Key",
       "apiKeyPlaceholder": "请输入 API Key",

@@ -8,6 +8,7 @@ export interface ModelInfo {
   model_name: string
   provider?: string
   model: string
+  tags?: string[]
   api_base?: string
   api_key: string
   proxy?: string
@@ -31,6 +32,7 @@ export interface ModelInfo {
   status: "available" | "unconfigured" | "unreachable"
   is_default: boolean
   is_virtual: boolean
+  is_vision_fallback: boolean
   default_model_allowed?: boolean
 }
 
@@ -56,6 +58,7 @@ interface ModelsListResponse {
   models: ModelInfo[]
   total: number
   default_model: string
+  vision_fallback_model: string
   provider_options: ModelProviderOption[]
 }
 
@@ -63,6 +66,7 @@ interface ModelActionResponse {
   status: string
   index?: number
   default_model?: string
+  vision_fallback_model?: string
 }
 
 const BASE_URL = ""
@@ -120,6 +124,22 @@ export async function setDefaultModel(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model_name: modelName }),
   })
+
+  await refreshGatewayState()
+  return response
+}
+
+export async function setVisionFallbackModel(
+  modelName: string,
+): Promise<ModelActionResponse> {
+  const response = await request<ModelActionResponse>(
+    "/api/models/vision-fallback",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model_name: modelName }),
+    },
+  )
 
   await refreshGatewayState()
   return response

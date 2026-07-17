@@ -246,6 +246,13 @@
     "providerCatalogUnavailable": "Katalog poskytovatelů backendu není dostupný. Výběr nových poskytovatelů je zakázán, dokud se API modelů úspěšně nenačte.",
     "noDefaultHintPrefix": "Zatím není nastaven žádný výchozí model. Klikněte na",
     "noDefaultHintSuffix": "pro nastavení.",
+    "visionFallback": {
+      "label": "Záložní model pro obraz",
+      "description": "Použije se pouze tehdy, když není nastaven image_model a aktivní hlavní model nemá tag vision.",
+      "none": "Nenastaveno",
+      "noOptions": "Pro výběr zde přidejte dostupnému modelu tag vision.",
+      "saveSuccess": "Záložní model pro obraz byl aktualizován."
+    },
     "status": {
       "available": "Dostupný",
       "unconfigured": "Nenakonfigurován",
@@ -253,7 +260,8 @@
     },
     "badge": {
       "default": "Výchozí",
-      "virtual": "Virtuální"
+      "virtual": "Virtuální",
+      "visionFallback": "Záloha pro obraz"
     },
     "action": {
       "edit": "Upravit API klíč",
@@ -305,6 +313,9 @@
       "providerHint": "Volitelné. Pokud je uvedeno, použije se jako skutečný provider a Identifikátor modelu se bere jako kanonické ID.",
       "providerInvalid": "Aktuální poskytovatel je neplatný. Vyberte podporovaného poskytovatele.",
       "selectProviderFirst": "Nejprve vyberte poskytovatele",
+      "tags": "Tagy",
+      "tagsHint": "Tagy schopností oddělené čárkami. Pokud model přijímá obrazový vstup, přidejte vision.",
+      "tagsPlaceholder": "např. vision",
       "apiBase": "API Base URL",
       "apiKey": "API Key",
       "apiKeyPlaceholder": "Zadejte API klíč",

@@ -287,7 +287,7 @@ func (p *Pipeline) CallLLM(
 		if hasMediaRefs(exec.callMessages) && isVisionUnsupportedError(err) {
 			return ControlBreak, visionUnsupportedModelError(
 				exec.llmModelName,
-				len(ts.agent.ImageCandidates) > 0,
+				len(ts.agent.ImageCandidates) > 0 || len(ts.agent.VisionFallbackCandidates) > 0,
 			)
 		}
 

@@ -272,6 +272,13 @@
     "providerCatalogUnavailable": "The backend provider catalog is unavailable. New provider selections are disabled until the Models API loads successfully.",
     "noDefaultHintPrefix": "No default model set yet. Click",
     "noDefaultHintSuffix": "to set one.",
+    "visionFallback": {
+      "label": "Fallback vision model",
+      "description": "Used only when image_model is not configured and the active primary model does not have the vision tag.",
+      "none": "Not configured",
+      "noOptions": "Add the vision tag to an available model to select it here.",
+      "saveSuccess": "Fallback vision model updated."
+    },
     "status": {
       "available": "Available",
       "unconfigured": "Not configured",
@@ -279,7 +286,8 @@
     },
     "badge": {
       "default": "Default",
-      "virtual": "Virtual"
+      "virtual": "Virtual",
+      "visionFallback": "Vision fallback"
     },
     "action": {
       "edit": "Edit API key",
@@ -331,6 +339,9 @@
       "providerHint": "Choose a provider from the backend catalog; Model Identifier will be interpreted as that provider's canonical model ID.",
       "providerInvalid": "The current provider is invalid. Please choose a supported provider.",
       "selectProviderFirst": "Select a provider first",
+      "tags": "Tags",
+      "tagsHint": "Comma-separated capability tags. Add vision when this model accepts image input.",
+      "tagsPlaceholder": "e.g. vision",
       "apiBase": "API Base URL",
       "apiKey": "API Key",
       "apiKeyPlaceholder": "Enter your API key",

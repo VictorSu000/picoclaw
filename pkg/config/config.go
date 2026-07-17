@@ -424,14 +424,18 @@ type ToolFeedbackConfig struct {
 }
 
 type AgentDefaults struct {
-	Workspace                 string             `json:"workspace"                        env:"PICOCLAW_AGENTS_DEFAULTS_WORKSPACE"`
-	RestrictToWorkspace       bool               `json:"restrict_to_workspace"            env:"PICOCLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE"`
-	AllowReadOutsideWorkspace bool               `json:"allow_read_outside_workspace"     env:"PICOCLAW_AGENTS_DEFAULTS_ALLOW_READ_OUTSIDE_WORKSPACE"`
-	Provider                  string             `json:"provider"                         env:"PICOCLAW_AGENTS_DEFAULTS_PROVIDER"`
-	ModelName                 string             `json:"model_name"                       env:"PICOCLAW_AGENTS_DEFAULTS_MODEL_NAME"`
-	ModelFallbacks            []string           `json:"model_fallbacks,omitempty"`
-	ImageModel                string             `json:"image_model,omitempty"            env:"PICOCLAW_AGENTS_DEFAULTS_IMAGE_MODEL"`
-	ImageModelFallbacks       []string           `json:"image_model_fallbacks,omitempty"`
+	Workspace                 string   `json:"workspace"                        env:"PICOCLAW_AGENTS_DEFAULTS_WORKSPACE"`
+	RestrictToWorkspace       bool     `json:"restrict_to_workspace"            env:"PICOCLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE"`
+	AllowReadOutsideWorkspace bool     `json:"allow_read_outside_workspace"     env:"PICOCLAW_AGENTS_DEFAULTS_ALLOW_READ_OUTSIDE_WORKSPACE"`
+	Provider                  string   `json:"provider"                         env:"PICOCLAW_AGENTS_DEFAULTS_PROVIDER"`
+	ModelName                 string   `json:"model_name"                       env:"PICOCLAW_AGENTS_DEFAULTS_MODEL_NAME"`
+	ModelFallbacks            []string `json:"model_fallbacks,omitempty"`
+	// ImageModel is the dedicated model override for media turns.
+	ImageModel          string   `json:"image_model,omitempty"            env:"PICOCLAW_AGENTS_DEFAULTS_IMAGE_MODEL"`
+	ImageModelFallbacks []string `json:"image_model_fallbacks,omitempty"`
+	// VisionFallbackModel is used only when ImageModel is not configured and
+	// the active primary model does not carry ModelTagVision.
+	VisionFallbackModel       string             `json:"vision_fallback_model,omitempty"  env:"PICOCLAW_AGENTS_DEFAULTS_VISION_FALLBACK_MODEL"`
 	MaxTokens                 int                `json:"max_tokens"                       env:"PICOCLAW_AGENTS_DEFAULTS_MAX_TOKENS"`
 	ContextWindow             int                `json:"context_window,omitempty"         env:"PICOCLAW_AGENTS_DEFAULTS_CONTEXT_WINDOW"`
 	Temperature               *float64           `json:"temperature,omitempty"            env:"PICOCLAW_AGENTS_DEFAULTS_TEMPERATURE"`
@@ -762,9 +766,10 @@ func (c ModelStreamingConfig) IsZero() bool {
 // groq, deepseek, modelscope, and novita.
 type ModelConfig struct {
 	// Required fields
-	ModelName string `json:"model_name"` // User-facing alias for the model
-	Provider  string `json:"provider"`   // Provider name for routing and selection. When empty, provider resolution infers it from Model.
-	Model     string `json:"model"`      // Model identifier, optionally provider-prefixed.
+	ModelName string   `json:"model_name"`                           // User-facing alias for the model
+	Provider  string   `json:"provider"`                             // Provider name for routing and selection. When empty, provider resolution infers it from Model.
+	Model     string   `json:"model"`                                // Model identifier, optionally provider-prefixed.
+	Tags      []string `json:"tags,omitempty" yaml:"tags,omitempty"` // Capability tags such as "vision".
 
 	// HTTP-based providers
 	APIBase   string   `json:"api_base,omitempty"`  // API endpoint URL
@@ -798,6 +803,26 @@ type ModelConfig struct {
 	// isVirtual marks this model as a virtual model generated from multi-key expansion.
 	// Virtual models should not be persisted to config files.
 	isVirtual bool
+}
+
+const ModelTagVision = "vision"
+
+// HasTag reports whether a model has the requested capability tag. Tags are
+// matched case-insensitively so hand-written configuration remains forgiving.
+func (c *ModelConfig) HasTag(tag string) bool {
+	if c == nil {
+		return false
+	}
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return false
+	}
+	for _, candidate := range c.Tags {
+		if strings.EqualFold(strings.TrimSpace(candidate), tag) {
+			return true
+		}
+	}
+	return false
 }
 
 // APIKey returns the first API key from apiKeys
@@ -1784,6 +1809,7 @@ func expandMultiKeyModels(models []*ModelConfig) []*ModelConfig {
 				ModelName:           expandedName,
 				Provider:            m.Provider,
 				Model:               m.Model,
+				Tags:                append([]string(nil), m.Tags...),
 				APIBase:             m.APIBase,
 				APIKeys:             SimpleSecureStrings(keys[i]),
 				Proxy:               m.Proxy,
@@ -1810,6 +1836,7 @@ func expandMultiKeyModels(models []*ModelConfig) []*ModelConfig {
 			ModelName:           originalName,
 			Provider:            m.Provider,
 			Model:               m.Model,
+			Tags:                append([]string(nil), m.Tags...),
 			APIBase:             m.APIBase,
 			Proxy:               m.Proxy,
 			AuthMethod:          m.AuthMethod,
