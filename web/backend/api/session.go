@@ -2,6 +2,7 @@ package api
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -12,11 +13,14 @@ import (
 	"strings"
 	"time"
 
+	agentpkg "github.com/sipeed/picoclaw/pkg/agent"
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/fileutil"
+	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/memory"
 	"github.com/sipeed/picoclaw/pkg/providers"
 	"github.com/sipeed/picoclaw/pkg/providers/messageutil"
+	"github.com/sipeed/picoclaw/pkg/routing"
 	"github.com/sipeed/picoclaw/pkg/session"
 	"github.com/sipeed/picoclaw/pkg/utils"
 )
@@ -99,12 +103,8 @@ const (
 	// pkg/memory/jsonl.go so oversized lines fail consistently everywhere.
 	maxSessionJSONLLineSize = 10 * 1024 * 1024
 	maxSessionTitleRunes    = 60
-	maxRebuiltSummaryRunes  = 8 * 1024
-	maxSummaryEntryRunes    = 1000
 
 	handledToolResponseSummaryText = "Requested output delivered via tool attachment."
-	rebuiltArchiveSummaryHeader    = "Conversation summary rebuilt from remaining archived history:"
-	rebuiltArchiveOmittedNotice    = "[Earlier archived messages omitted to keep this rebuilt summary concise.]"
 )
 
 func defaultToolFeedbackMaxArgsLength() int {
@@ -1518,72 +1518,84 @@ func rawRangeOverlap(start, end, rangeStart, rangeEnd int) int {
 	return overlapEnd - overlapStart
 }
 
-func rebuildArchivedSummary(
+type contextSummaryProviderFactory func(*config.Config) (providers.LLMProvider, string, error)
+
+func defaultContextSummaryProviderFactory(
+	cfg *config.Config,
+) (providers.LLMProvider, string, error) {
+	return providers.CreateProvider(cfg)
+}
+
+// rebuildArchivedSummary deliberately passes an empty existing summary: the
+// stored summary may describe the message that was just deleted. The remaining
+// archive is summarized through the exact same batching, merge, retry, and
+// fallback implementation used by normal legacy context compression.
+func (h *Handler) rebuildArchivedSummary(
+	ctx context.Context,
 	messages []providers.Message,
-	toolFeedbackMaxArgsLength int,
-) string {
+) (string, error) {
 	if len(messages) == 0 {
-		return ""
+		return "", nil
 	}
 
-	transcript := detailSessionMessages(messages, toolFeedbackMaxArgsLength)
-	entries := make([]string, 0, len(transcript))
-	for _, msg := range transcript {
-		if msg.Role != "user" && msg.Role != "assistant" {
-			continue
-		}
-		if msg.Role == "assistant" && msg.Kind != "" && msg.Kind != "normal" {
-			continue
-		}
-
-		content := strings.TrimSpace(msg.Content)
-		if content == "" {
-			content = sessionChatMessagePreview(msg)
-		}
-		if content == "" {
-			continue
-		}
-		content = truncateRunes(content, maxSummaryEntryRunes)
-		entries = append(entries, msg.Role+": "+content)
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		return "", err
 	}
-	if len(entries) == 0 {
-		return ""
+	maxTokens := cfg.Agents.Defaults.MaxTokens
+	if maxTokens == 0 {
+		maxTokens = 8192
+	}
+	contextWindow := cfg.Agents.Defaults.ContextWindow
+	if contextWindow == 0 {
+		contextWindow = maxTokens * 4
 	}
 
-	// Always reserve room for the omission notice so the result remains within
-	// the configured cap even when only part of the archive can be represented.
-	remaining := maxRebuiltSummaryRunes -
-		len([]rune(rebuiltArchiveSummaryHeader)) -
-		len([]rune(rebuiltArchiveOmittedNotice)) - 3
-	selectedReversed := make([]string, 0, len(entries))
-	omitted := false
-	for index := len(entries) - 1; index >= 0; index-- {
-		entryRunes := len([]rune(entries[index])) + 1
-		if entryRunes > remaining {
-			omitted = true
-			break
-		}
-		selectedReversed = append(selectedReversed, entries[index])
-		remaining -= entryRunes
+	factory := h.contextSummaryProvider
+	if factory == nil {
+		factory = defaultContextSummaryProviderFactory
 	}
-	if len(selectedReversed) == 0 {
-		return rebuiltArchiveSummaryHeader
+	provider, modelID, providerErr := factory(cfg)
+	var complete agentpkg.ContextSummaryCompletion
+	if providerErr != nil {
+		logger.WarnCF("launcher", "Failed to create provider for archive summary rebuild; using fallback", map[string]any{
+			"error": providerErr.Error(),
+		})
+	} else if provider == nil {
+		logger.WarnCF("launcher", "Archive summary provider is nil; using fallback", nil)
+	} else {
+		if stateful, ok := provider.(providers.StatefulProvider); ok {
+			defer stateful.Close()
+		}
+		complete = func(ctx context.Context, prompt string) (string, error) {
+			response, chatErr := provider.Chat(
+				ctx,
+				[]providers.Message{{Role: "user", Content: prompt}},
+				nil,
+				modelID,
+				map[string]any{
+					"max_tokens":       maxTokens,
+					"temperature":      agentpkg.ContextSummaryTemperature(),
+					"prompt_cache_key": routing.DefaultAgentID,
+				},
+			)
+			if response == nil {
+				return "", chatErr
+			}
+			return response.Content, chatErr
+		}
 	}
 
-	var builder strings.Builder
-	builder.WriteString(rebuiltArchiveSummaryHeader)
-	builder.WriteByte('\n')
-	if omitted {
-		builder.WriteString(rebuiltArchiveOmittedNotice)
-		builder.WriteByte('\n')
-	}
-	for index := len(selectedReversed) - 1; index >= 0; index-- {
-		builder.WriteString(selectedReversed[index])
-		if index > 0 {
-			builder.WriteByte('\n')
-		}
-	}
-	return builder.String()
+	summaryCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+	result := agentpkg.BuildContextSummary(
+		summaryCtx,
+		messages,
+		"",
+		contextWindow,
+		complete,
+	)
+	return result.Summary, nil
 }
 
 // handleDeleteMessageSeries removes the complete raw message series ending at
@@ -1635,6 +1647,14 @@ func (h *Handler) handleDeleteMessageSeries(w http.ResponseWriter, r *http.Reque
 		newArchivedCount := sess.ArchivedRawCount - archivedDeleted
 		archived := append([]providers.Message(nil), remaining[:newArchivedCount]...)
 		active := append([]providers.Message(nil), remaining[newArchivedCount:]...)
+		rebuiltSummary := ""
+		if archivedDeleted > 0 {
+			rebuiltSummary, err = h.rebuildArchivedSummary(r.Context(), archived)
+			if err != nil {
+				http.Error(w, "failed to rebuild session summary", http.StatusInternalServerError)
+				return
+			}
+		}
 
 		store, storeErr := memory.NewJSONLStore(dir)
 		if storeErr != nil {
@@ -1652,7 +1672,6 @@ func (h *Handler) handleDeleteMessageSeries(w http.ResponseWriter, r *http.Reque
 				http.Error(w, "failed to update archived history", http.StatusInternalServerError)
 				return
 			}
-			rebuiltSummary := rebuildArchivedSummary(archived, toolFeedbackMaxArgsLength)
 			if err := store.SetSummary(r.Context(), ref.Key, rebuiltSummary); err != nil {
 				http.Error(w, "failed to rebuild session summary", http.StatusInternalServerError)
 				return
@@ -1708,7 +1727,11 @@ func (h *Handler) handleDeleteMessageSeries(w http.ResponseWriter, r *http.Reque
 	remaining = append(remaining, sess.Messages[end:]...)
 	sess.Messages = remaining
 	if strings.TrimSpace(sess.Summary) != "" {
-		sess.Summary = rebuildArchivedSummary(remaining, toolFeedbackMaxArgsLength)
+		sess.Summary, err = h.rebuildArchivedSummary(r.Context(), remaining)
+		if err != nil {
+			http.Error(w, "failed to rebuild session summary", http.StatusInternalServerError)
+			return
+		}
 	}
 	sess.Updated = time.Now()
 	data, err := json.MarshalIndent(sess, "", "  ")

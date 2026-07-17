@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -213,60 +212,34 @@ func (m *legacyContextManager) summarizeSession(agent *AgentInstance, sessionKey
 	keepCount := len(history) - safeCut
 	toSummarize := history[:safeCut]
 
-	maxMessageTokens := agent.ContextWindow / 2
-	validMessages := make([]providers.Message, 0)
-	omitted := false
-
-	for _, msg := range toSummarize {
-		if msg.Role != "user" && msg.Role != "assistant" {
-			continue
-		}
-		msgTokens := len(msg.Content) / 2
-		if msgTokens > maxMessageTokens {
-			omitted = true
-			continue
-		}
-		validMessages = append(validMessages, msg)
-	}
-
-	if len(validMessages) == 0 {
-		return
-	}
-
-	const (
-		maxSummarizationMessages = 10
-		llmMaxRetries            = 3
-	)
-
-	var finalSummary string
-	if len(validMessages) > maxSummarizationMessages {
-		mid := len(validMessages) / 2
-		mid = m.findNearestUserMessage(validMessages, mid)
-
-		part1 := validMessages[:mid]
-		part2 := validMessages[mid:]
-
-		s1, _ := m.summarizeBatch(ctx, agent, part1, "")
-		s2, _ := m.summarizeBatch(ctx, agent, part2, "")
-
-		mergePrompt := fmt.Sprintf(
-			"Merge these two conversation summaries into one cohesive summary:\n\n1: %s\n\n2: %s",
-			s1, s2,
+	provider := withCurrentCandidateRateLimit(agent.Provider, m.al, agent.Candidates)
+	complete := func(ctx context.Context, prompt string) (string, error) {
+		m.al.activeRequestsInc()
+		defer m.al.activeRequestsDec()
+		resp, err := provider.Chat(
+			ctx,
+			[]providers.Message{{Role: "user", Content: prompt}},
+			nil,
+			agent.Model,
+			map[string]any{
+				"max_tokens":       agent.MaxTokens,
+				"temperature":      ContextSummaryTemperature(),
+				"prompt_cache_key": agent.ID,
+			},
 		)
-
-		resp, err := m.retryLLMCall(ctx, agent, mergePrompt, llmMaxRetries)
-		if err == nil && resp.Content != "" {
-			finalSummary = resp.Content
-		} else {
-			finalSummary = s1 + " " + s2
+		if resp == nil {
+			return "", err
 		}
-	} else {
-		finalSummary, _ = m.summarizeBatch(ctx, agent, validMessages, summary)
+		return resp.Content, err
 	}
-
-	if omitted && finalSummary != "" {
-		finalSummary += "\n[Note: Some oversized messages were omitted from this summary for efficiency.]"
-	}
+	result := BuildContextSummary(
+		ctx,
+		toSummarize,
+		summary,
+		agent.ContextWindow,
+		complete,
+	)
+	finalSummary := result.Summary
 
 	if finalSummary != "" {
 		agent.Sessions.SetSummary(sessionKey, finalSummary)
@@ -281,136 +254,13 @@ func (m *legacyContextManager) summarizeSession(agent *AgentInstance, sessionKey
 			runtimeevents.KindAgentSessionSummarize,
 			m.al.newTurnEventScope(agent.ID, sessionKey, nil).meta(0, "summarizeSession", "turn.session.summarize"),
 			SessionSummarizePayload{
-				SummarizedMessages: len(validMessages),
+				SummarizedMessages: result.SummarizedMessages,
 				KeptMessages:       keepCount,
 				SummaryLen:         len(finalSummary),
-				OmittedOversized:   omitted,
+				OmittedOversized:   result.OmittedOversized,
 			},
 		)
 	}
-}
-
-func (m *legacyContextManager) findNearestUserMessage(messages []providers.Message, mid int) int {
-	originalMid := mid
-
-	for mid > 0 && messages[mid].Role != "user" {
-		mid--
-	}
-
-	if messages[mid].Role == "user" {
-		return mid
-	}
-
-	mid = originalMid
-	for mid < len(messages) && messages[mid].Role != "user" {
-		mid++
-	}
-
-	if mid < len(messages) {
-		return mid
-	}
-
-	return originalMid
-}
-
-func (m *legacyContextManager) retryLLMCall(
-	ctx context.Context,
-	agent *AgentInstance,
-	prompt string,
-	maxRetries int,
-) (*providers.LLMResponse, error) {
-	const llmTemperature = 0.3
-
-	var resp *providers.LLMResponse
-	var err error
-	provider := withCurrentCandidateRateLimit(agent.Provider, m.al, agent.Candidates)
-
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		m.al.activeRequestsInc()
-		resp, err = func() (*providers.LLMResponse, error) {
-			defer m.al.activeRequestsDec()
-			return provider.Chat(
-				ctx,
-				[]providers.Message{{Role: "user", Content: prompt}},
-				nil,
-				agent.Model,
-				map[string]any{
-					"max_tokens":       agent.MaxTokens,
-					"temperature":      llmTemperature,
-					"prompt_cache_key": agent.ID,
-				},
-			)
-		}()
-
-		if err == nil && resp != nil && resp.Content != "" {
-			return resp, nil
-		}
-		if attempt < maxRetries-1 {
-			time.Sleep(time.Duration(attempt+1) * 100 * time.Millisecond)
-		}
-	}
-
-	return resp, err
-}
-
-func (m *legacyContextManager) summarizeBatch(
-	ctx context.Context,
-	agent *AgentInstance,
-	batch []providers.Message,
-	existingSummary string,
-) (string, error) {
-	const (
-		llmMaxRetries             = 3
-		fallbackMinContentLength  = 200
-		fallbackMaxContentPercent = 10
-	)
-
-	var sb strings.Builder
-	sb.WriteString("Provide a concise summary of this conversation segment, preserving core context and key points.\n")
-	if existingSummary != "" {
-		sb.WriteString("Existing context: ")
-		sb.WriteString(existingSummary)
-		sb.WriteString("\n")
-	}
-	sb.WriteString("\nCONVERSATION:\n")
-	for _, msg := range batch {
-		fmt.Fprintf(&sb, "%s: %s\n", msg.Role, msg.Content)
-	}
-	prompt := sb.String()
-
-	response, err := m.retryLLMCall(ctx, agent, prompt, llmMaxRetries)
-	if err == nil && response.Content != "" {
-		return strings.TrimSpace(response.Content), nil
-	}
-
-	var fallback strings.Builder
-	fallback.WriteString("Conversation summary: ")
-	for i, msg := range batch {
-		if i > 0 {
-			fallback.WriteString(" | ")
-		}
-		content := strings.TrimSpace(msg.Content)
-		runes := []rune(content)
-		if len(runes) == 0 {
-			fallback.WriteString(fmt.Sprintf("%s: ", msg.Role))
-			continue
-		}
-
-		keepLength := len(runes) * fallbackMaxContentPercent / 100
-		if keepLength < fallbackMinContentLength {
-			keepLength = fallbackMinContentLength
-		}
-		if keepLength > len(runes) {
-			keepLength = len(runes)
-		}
-
-		content = string(runes[:keepLength])
-		if keepLength < len(runes) {
-			content += "..."
-		}
-		fallback.WriteString(fmt.Sprintf("%s: %s", msg.Role, content))
-	}
-	return fallback.String(), nil
 }
 
 func (m *legacyContextManager) estimateTokens(messages []providers.Message) int {

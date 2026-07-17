@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,10 +12,41 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/memory"
 	"github.com/sipeed/picoclaw/pkg/providers"
 	"github.com/sipeed/picoclaw/pkg/session"
 )
+
+type recordingContextSummaryProvider struct {
+	response string
+	err      error
+	prompts  []string
+	models   []string
+	options  []map[string]any
+}
+
+func (p *recordingContextSummaryProvider) Chat(
+	_ context.Context,
+	messages []providers.Message,
+	_ []providers.ToolDefinition,
+	model string,
+	options map[string]any,
+) (*providers.LLMResponse, error) {
+	if len(messages) > 0 {
+		p.prompts = append(p.prompts, messages[0].Content)
+	}
+	p.models = append(p.models, model)
+	p.options = append(p.options, options)
+	if p.err != nil {
+		return nil, p.err
+	}
+	return &providers.LLMResponse{Content: p.response}, nil
+}
+
+func (p *recordingContextSummaryProvider) GetDefaultModel() string {
+	return "summary-model"
+}
 
 func deleteMessageSeriesRequest(
 	t *testing.T,
@@ -24,6 +57,17 @@ func deleteMessageSeriesRequest(
 	t.Helper()
 
 	h := NewHandler(configPath)
+	return deleteMessageSeriesRequestWithHandler(t, h, sessionID, transcriptIndex)
+}
+
+func deleteMessageSeriesRequestWithHandler(
+	t *testing.T,
+	h *Handler,
+	sessionID string,
+	transcriptIndex int,
+) (*httptest.ResponseRecorder, sessionDetailResponse) {
+	t.Helper()
+
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 	rec := httptest.NewRecorder()
@@ -185,19 +229,42 @@ func TestHandleDeleteMessageSeries_RebuildsSummaryFromRemainingArchive(t *testin
 	if err := store.SetSummary(nil, sessionKey, "stale summary containing deleted archived answer"); err != nil {
 		t.Fatalf("SetSummary() error = %v", err)
 	}
+	provider := &recordingContextSummaryProvider{response: "LLM summary of remaining archive"}
+	h := NewHandler(configPath)
+	h.contextSummaryProvider = func(_ *config.Config) (providers.LLMProvider, string, error) {
+		return provider, "summary-model", nil
+	}
 
 	// Combined transcript starts with the four archived entries.
-	rec, response := deleteMessageSeriesRequest(t, configPath, sessionID, 3)
+	rec, response := deleteMessageSeriesRequestWithHandler(t, h, sessionID, 3)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 	if response.ArchivedCount != 3 {
 		t.Fatalf("response.ArchivedCount = %d, want 3", response.ArchivedCount)
 	}
-	if !strings.Contains(response.Summary, rebuiltArchiveSummaryHeader) ||
-		!strings.Contains(response.Summary, "keep archived answer") ||
-		strings.Contains(response.Summary, "deleted archived answer") {
+	if response.Summary != "LLM summary of remaining archive" {
 		t.Fatalf("rebuilt summary = %q", response.Summary)
+	}
+	if len(provider.prompts) != 1 {
+		t.Fatalf("summary provider calls = %d, want 1", len(provider.prompts))
+	}
+	prompt := provider.prompts[0]
+	if !strings.HasPrefix(prompt, "Provide a concise summary of this conversation segment, preserving core context and key points.\n") ||
+		!strings.Contains(prompt, "\nCONVERSATION:\nuser: keep archived user\nassistant: keep archived answer\n") ||
+		strings.Contains(prompt, "deleted archived answer") ||
+		strings.Contains(prompt, "stale summary") ||
+		strings.Contains(prompt, "Existing context:") {
+		t.Fatalf("unexpected summary prompt = %q", prompt)
+	}
+	if len(provider.models) != 1 || provider.models[0] != "summary-model" {
+		t.Fatalf("summary models = %#v", provider.models)
+	}
+	if got := provider.options[0]["temperature"]; got != 0.3 {
+		t.Fatalf("summary temperature = %#v, want 0.3", got)
+	}
+	if got := provider.options[0]["prompt_cache_key"]; got != "main" {
+		t.Fatalf("summary prompt_cache_key = %#v, want main", got)
 	}
 
 	remainingArchive, err := store.ReadArchivedMessages(nil, sessionKey)
@@ -206,6 +273,47 @@ func TestHandleDeleteMessageSeries_RebuildsSummaryFromRemainingArchive(t *testin
 	}
 	if len(remainingArchive) != 3 {
 		t.Fatalf("len(remainingArchive) = %d, want 3", len(remainingArchive))
+	}
+}
+
+func TestHandleDeleteMessageSeries_SummaryProviderFailureUsesCompressionFallback(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	dir := sessionsTestDir(t, configPath)
+	store, err := memory.NewJSONLStore(dir)
+	if err != nil {
+		t.Fatalf("NewJSONLStore() error = %v", err)
+	}
+	sessionID := "delete-archive-summary-fallback"
+	sessionKey := legacyPicoSessionPrefix + sessionID
+	if err := store.AddFullMessage(nil, sessionKey, providers.Message{Role: "user", Content: "active"}); err != nil {
+		t.Fatalf("AddFullMessage() error = %v", err)
+	}
+	if err := store.ArchiveMessages(nil, sessionKey, []providers.Message{
+		{Role: "user", Content: "remaining archived user"},
+		{Role: "assistant", Content: "remaining archived answer"},
+		{Role: "assistant", Content: "delete this archived answer"},
+	}); err != nil {
+		t.Fatalf("ArchiveMessages() error = %v", err)
+	}
+	if err := store.SetSummary(nil, sessionKey, "stale summary"); err != nil {
+		t.Fatalf("SetSummary() error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	h.contextSummaryProvider = func(_ *config.Config) (providers.LLMProvider, string, error) {
+		return nil, "", errors.New("provider unavailable")
+	}
+	rec, response := deleteMessageSeriesRequestWithHandler(t, h, sessionID, 2)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if !strings.HasPrefix(response.Summary, "Conversation summary: ") ||
+		!strings.Contains(response.Summary, "remaining archived answer") ||
+		strings.Contains(response.Summary, "delete this archived answer") ||
+		strings.Contains(response.Summary, "stale summary") {
+		t.Fatalf("fallback summary = %q", response.Summary)
 	}
 }
 

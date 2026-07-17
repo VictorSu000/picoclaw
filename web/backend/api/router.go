@@ -27,6 +27,7 @@ type Handler struct {
 	weixinFlows                map[string]*weixinFlow
 	wecomMu                    sync.Mutex
 	wecomFlows                 map[string]*wecomFlow
+	contextSummaryProvider     contextSummaryProviderFactory
 }
 
 // NewHandler creates an instance of the API handler.
@@ -39,6 +40,7 @@ func NewHandler(configPath string) *Handler {
 		oauthState:                 make(map[string]string),
 		weixinFlows:                make(map[string]*weixinFlow),
 		wecomFlows:                 make(map[string]*wecomFlow),
+		contextSummaryProvider:     defaultContextSummaryProviderFactory,
 	}
 }
 
