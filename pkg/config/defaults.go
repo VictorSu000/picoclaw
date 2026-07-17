@@ -454,6 +454,12 @@ func DefaultConfig() *Config {
 			InstallSkill: ToolConfig{
 				Enabled: true,
 			},
+			ImageGenerate: ImageGenerateToolsConfig{
+				ToolConfig: ToolConfig{
+					Enabled: false,
+				},
+				MaxCount: 4,
+			},
 			ListDir: ToolConfig{
 				Enabled: true,
 			},

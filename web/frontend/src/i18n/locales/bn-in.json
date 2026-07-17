@@ -261,6 +261,13 @@
       "noOptions": "এখানে নির্বাচন করতে একটি উপলব্ধ মডেলে vision ট্যাগ যোগ করুন।",
       "saveSuccess": "ফলব্যাক ভিশন মডেল আপডেট হয়েছে।"
     },
+    "imageGeneration": {
+      "label": "Image generation model",
+      "description": "Used by image_generate through an OpenAI-compatible image endpoint. Selecting a model enables the tool.",
+      "none": "কনফিগার করা নেই",
+      "noOptions": "Add the image_generation tag to a model to select it here.",
+      "saveSuccess": "Image generation model updated."
+    },
     "status": {
       "available": "উপলব্ধ",
       "unconfigured": "কনফিগার করা নেই",
@@ -269,7 +276,8 @@
     "badge": {
       "default": "ডিফল্ট",
       "virtual": "ভার্চুয়াল",
-      "visionFallback": "ভিশন ফলব্যাক"
+      "visionFallback": "ভিশন ফলব্যাক",
+      "imageGeneration": "Image generation"
     },
     "action": {
       "edit": "API কী সম্পাদনা করুন",

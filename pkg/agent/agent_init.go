@@ -5,6 +5,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -262,6 +263,26 @@ func registerSharedTools(
 				allowReadPaths,
 			)
 			agent.Tools.Register(sendFileTool)
+		}
+
+		// OpenAI-compatible image generation. The tool is only exposed when a
+		// dedicated image generation model is configured, so image_model keeps
+		// its existing vision-input routing semantics.
+		if cfg.Tools.IsToolEnabled("image_generate") {
+			if strings.TrimSpace(cfg.Agents.Defaults.ImageGenerationModel) == "" {
+				logger.WarnCF("agent", "image_generate enabled but no image generation model configured", map[string]any{
+					"agent_id": agent.ID,
+				})
+			} else {
+				agent.Tools.Register(tools.NewImageGenerateTool(
+					cfg,
+					cfg.Agents.Defaults.ImageGenerationModel,
+					cfg.Agents.Defaults.ImageGenerationModelFallbacks,
+					cfg.Tools.ImageGenerate.GetMaxCount(),
+					cfg.Agents.Defaults.GetMaxMediaSize(),
+					nil,
+				))
+			}
 		}
 
 		if ttsProvider != nil {

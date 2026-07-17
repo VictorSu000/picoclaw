@@ -36,6 +36,7 @@ type (
 type Provider struct {
 	apiKey         string
 	apiBase        string
+	proxy          string
 	providerName   string
 	maxTokensField string // Field name for max tokens (e.g., "max_completion_tokens" for o1/glm models)
 	httpClient     *http.Client
@@ -113,6 +114,7 @@ func NewProvider(apiKey, apiBase, proxy string, opts ...Option) *Provider {
 	p := &Provider{
 		apiKey:     apiKey,
 		apiBase:    strings.TrimRight(apiBase, "/"),
+		proxy:      proxy,
 		httpClient: common.NewHTTPClient(proxy),
 	}
 

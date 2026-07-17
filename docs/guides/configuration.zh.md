@@ -660,6 +660,53 @@ Agent 读取 HEARTBEAT.md
 
 通过 WebUI 选择备用视觉模型时，该模型本身必须带有 `vision` 标签。
 
+#### 图像生成
+
+图像生成与视觉输入路由相互独立。请为专用模型添加 `image_generation`
+标签，通过 `agents.defaults.image_generation_model` 选择它，并启用
+`tools.image_generate`。第一版调用 OpenAI 兼容的
+`POST {api_base}/images/generations` 接口，同时支持 `b64_json` 和临时
+`url` 两种响应。
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "model_name": "text-model",
+      "image_generation_model": "openai-image",
+      "image_generation_model_fallbacks": []
+    }
+  },
+  "model_list": [
+    {
+      "model_name": "openai-image",
+      "provider": "openai",
+      "model": "gpt-image-2",
+      "tags": ["image_generation"],
+      "api_base": "https://api.openai.com/v1",
+      "api_keys": ["sk-..."],
+      "request_timeout": 180,
+      "enabled": true
+    }
+  ],
+  "tools": {
+    "image_generate": {
+      "enabled": true,
+      "max_count": 4
+    }
+  }
+}
+```
+
+`image_generate` 工具支持 `prompt`、`count`、`size`、`quality`、
+`output_format`、`background`、`filename`，以及精确的 `model` 别名覆盖。
+生成图片会写入 MediaStore，并通过当前聊天渠道直接发送。特定兼容端点需要的
+`response_format` 等字段可写入图像模型的 `extra_body`。如果
+`extra_body` 含有图像专用字段，不要把同一模型条目同时用作聊天模型。
+
+第一版采用同步执行且仅支持文生图；图片编辑、局部图片流式返回和持久化后台任务
+暂未包含。
+
 #### 流式输出配置
 
 Provider 流式输出采用双开关，默认关闭。只有当前 channel 的 `settings.streaming.enabled` 和当前模型条目的 `streaming.enabled` 都为 `true`，并且 provider 与 channel 都支持流式能力时，Agent 才会尝试流式请求；任一条件不满足时仍使用普通非流式请求。

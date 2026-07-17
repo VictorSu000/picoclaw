@@ -868,6 +868,57 @@ Add the `vision` tag to models that accept image input. `agents.defaults.vision_
 
 The fallback model itself must carry the `vision` tag when it is selected through the WebUI.
 
+#### Image Generation
+
+Image generation is separate from vision input routing. Add the
+`image_generation` tag to a dedicated model entry, select it with
+`agents.defaults.image_generation_model`, and enable `tools.image_generate`.
+The first implementation uses the OpenAI-compatible
+`POST {api_base}/images/generations` endpoint and accepts both `b64_json` and
+temporary `url` responses.
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "model_name": "text-model",
+      "image_generation_model": "openai-image",
+      "image_generation_model_fallbacks": []
+    }
+  },
+  "model_list": [
+    {
+      "model_name": "openai-image",
+      "provider": "openai",
+      "model": "gpt-image-2",
+      "tags": ["image_generation"],
+      "api_base": "https://api.openai.com/v1",
+      "api_keys": ["sk-..."],
+      "request_timeout": 180,
+      "enabled": true
+    }
+  ],
+  "tools": {
+    "image_generate": {
+      "enabled": true,
+      "max_count": 4
+    }
+  }
+}
+```
+
+The `image_generate` tool supports `prompt`, `count`, `size`, `quality`,
+`output_format`, `background`, `filename`, and an exact `model` alias override.
+Generated images are written to the media store and sent directly through the
+current channel. Provider-specific OpenAI-compatible fields, such as
+`response_format`, can be supplied through the image model entry's
+`extra_body`. Do not use the same entry as a chat model when its `extra_body`
+contains image-only fields.
+
+The first implementation is synchronous and supports text-to-image generation
+only. Image editing, streaming partial images, and persistent background tasks
+are not included yet.
+
 #### Streaming Configuration
 
 Provider streaming uses a double opt-in and is disabled by default. The agent only tries streaming when the current channel has `settings.streaming.enabled: true`, the active model entry has `streaming.enabled: true`, and both the provider and channel support streaming. If any condition is missing, PicoClaw uses the normal non-streaming request path.

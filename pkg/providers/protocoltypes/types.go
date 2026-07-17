@@ -55,6 +55,35 @@ type UsageInfo struct {
 	TotalTokens      int `json:"total_tokens"`
 }
 
+// ImageGenerationRequest is the provider-neutral request used by image
+// generation tools. Providers should omit empty optional values from their
+// wire payload so strict OpenAI-compatible endpoints do not reject fields they
+// do not support.
+type ImageGenerationRequest struct {
+	Prompt       string
+	Count        int
+	Size         string
+	Quality      string
+	OutputFormat string
+	Background   string
+	MaxImageSize int
+}
+
+// GeneratedImage is one decoded image returned by an image generation
+// provider. Binary data is kept out of model-visible tool results and session
+// history; the tool stores it in MediaStore before returning.
+type GeneratedImage struct {
+	Data          []byte
+	ContentType   string
+	Filename      string
+	RevisedPrompt string
+}
+
+type ImageGenerationResponse struct {
+	Images []GeneratedImage
+	Usage  map[string]any
+}
+
 // CacheControl marks a content block for LLM-side prefix caching.
 // Currently only "ephemeral" is supported (used by Anthropic).
 type CacheControl struct {

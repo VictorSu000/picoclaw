@@ -3,6 +3,7 @@ import {
   IconLoader2,
   IconPhoto,
   IconPlus,
+  IconSparkles,
   IconStar,
 } from "@tabler/icons-react"
 import { useCallback, useEffect, useState } from "react"
@@ -14,6 +15,7 @@ import {
   type ModelProviderOption,
   getModels,
   setDefaultModel,
+  setImageGenerationModel,
   setVisionFallbackModel,
 } from "@/api/models"
 import { PageHeader } from "@/components/page-header"
@@ -57,6 +59,8 @@ export function ModelsPage() {
   const [fetchError, setFetchError] = useState("")
   const [visionFallbackModel, setVisionFallbackModelName] = useState("")
   const [settingVisionFallback, setSettingVisionFallback] = useState(false)
+  const [imageGenerationModel, setImageGenerationModelName] = useState("")
+  const [settingImageGeneration, setSettingImageGeneration] = useState(false)
 
   const [editingModel, setEditingModel] = useState<ModelInfo | null>(null)
   const [deletingModel, setDeletingModel] = useState<ModelInfo | null>(null)
@@ -80,6 +84,7 @@ export function ModelsPage() {
       })
       setModels(sorted)
       setVisionFallbackModelName(data.vision_fallback_model || "")
+      setImageGenerationModelName(data.image_generation_model || "")
       setProviderOptions(data.provider_options || [])
       setFetchError("")
     } catch (e) {
@@ -133,6 +138,28 @@ export function ModelsPage() {
       toast.error(e instanceof Error ? e.message : t("models.loadError"))
     } finally {
       setSettingVisionFallback(false)
+    }
+  }
+
+  const handleSetImageGeneration = async (value: string) => {
+    const modelName = value === "__none__" ? "" : value
+    if (modelName === imageGenerationModel) return
+
+    setSettingImageGeneration(true)
+    try {
+      await setImageGenerationModel(modelName)
+      await fetchModels()
+      const gateway = await refreshGatewayState({ force: true })
+      showSaveSuccessOrRestartToast(
+        t,
+        t("models.imageGeneration.saveSuccess"),
+        modelName || t("models.imageGeneration.none"),
+        gateway?.restartRequired === true,
+      )
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("models.loadError"))
+    } finally {
+      setSettingImageGeneration(false)
     }
   }
 
@@ -207,6 +234,20 @@ export function ModelsPage() {
       !model.is_virtual &&
       model.default_model_allowed !== false &&
       (model.available || isConfiguredFallback) &&
+      firstWithName === index
+    )
+  })
+  const imageGenerationOptions = models.filter((model, index, all) => {
+    const hasImageGenerationTag = model.tags?.some(
+      (tag) => tag.trim().toLowerCase() === "image_generation",
+    )
+    const isConfigured = model.model_name === imageGenerationModel
+    const firstWithName = all.findIndex(
+      (candidate) => candidate.model_name === model.model_name,
+    )
+    return (
+      (hasImageGenerationTag || isConfigured) &&
+      !model.is_virtual &&
       firstWithName === index
     )
   })
@@ -286,6 +327,46 @@ export function ModelsPage() {
           {!loading && visionFallbackOptions.length === 0 && (
             <p className="text-muted-foreground mt-1 text-xs">
               {t("models.visionFallback.noOptions")}
+            </p>
+          )}
+          <div className="border-border/60 bg-card mt-3 flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-start gap-2.5">
+              <IconSparkles className="text-muted-foreground mt-0.5 size-4 shrink-0" />
+              <div>
+                <p className="text-sm font-medium">
+                  {t("models.imageGeneration.label")}
+                </p>
+                <p className="text-muted-foreground text-xs leading-relaxed">
+                  {t("models.imageGeneration.description")}
+                </p>
+              </div>
+            </div>
+            <Select
+              value={imageGenerationModel || "__none__"}
+              onValueChange={(value) => void handleSetImageGeneration(value)}
+              disabled={loading || settingImageGeneration}
+            >
+              <SelectTrigger className="w-full sm:w-64">
+                {settingImageGeneration && (
+                  <IconLoader2 className="size-3.5 animate-spin" />
+                )}
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">
+                  {t("models.imageGeneration.none")}
+                </SelectItem>
+                {imageGenerationOptions.map((model) => (
+                  <SelectItem key={model.model_name} value={model.model_name}>
+                    {model.model_name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {!loading && imageGenerationOptions.length === 0 && (
+            <p className="text-muted-foreground mt-1 text-xs">
+              {t("models.imageGeneration.noOptions")}
             </p>
           )}
           {!loading && providerOptions.length === 0 && (

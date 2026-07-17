@@ -5,6 +5,8 @@
       "workspace": "~/.picoclaw/workspace",
       "restrict_to_workspace": true,
       "model_name": "gpt-5.4",
+      "image_generation_model": "openai-image",
+      "image_generation_model_fallbacks": [],
       "max_tokens": 8192,
       "context_window": 131072,
       "temperature": 0.7,
@@ -53,6 +55,16 @@
       "model": "openai/gpt-5.4",
       "api_keys": ["sk-your-openai-key"],
       "api_base": "https://api.openai.com/v1"
+    },
+    {
+      "model_name": "openai-image",
+      "provider": "openai",
+      "model": "gpt-image-2",
+      "tags": ["image_generation"],
+      "api_keys": ["sk-your-openai-key"],
+      "api_base": "https://api.openai.com/v1",
+      "request_timeout": 180,
+      "enabled": true
     },
     {
       "model_name": "claude-sonnet-4.6",
@@ -522,6 +534,10 @@
     },
     "install_skill": {
       "enabled": true
+    },
+    "image_generate": {
+      "enabled": true,
+      "max_count": 4
     },
     "list_dir": {
       "enabled": true

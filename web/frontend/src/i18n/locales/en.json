@@ -286,6 +286,13 @@
       "noOptions": "Add the vision tag to an available model to select it here.",
       "saveSuccess": "Fallback vision model updated."
     },
+    "imageGeneration": {
+      "label": "Image generation model",
+      "description": "Used by the image_generate tool through an OpenAI-compatible image endpoint. Selecting a model enables the tool.",
+      "none": "Not configured",
+      "noOptions": "Add the image_generation tag to a model to select it here.",
+      "saveSuccess": "Image generation model updated."
+    },
     "status": {
       "available": "Available",
       "unconfigured": "Not configured",
@@ -294,7 +301,8 @@
     "badge": {
       "default": "Default",
       "virtual": "Virtual",
-      "visionFallback": "Vision fallback"
+      "visionFallback": "Vision fallback",
+      "imageGeneration": "Image generation"
     },
     "action": {
       "edit": "Edit API key",

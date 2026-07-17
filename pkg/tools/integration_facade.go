@@ -17,6 +17,7 @@ type (
 	MCPTool                  = integrationtools.MCPTool
 	FindSkillsTool           = integrationtools.FindSkillsTool
 	InstallSkillTool         = integrationtools.InstallSkillTool
+	ImageGenerateTool        = integrationtools.ImageGenerateTool
 	MessageTool              = integrationtools.MessageTool
 	ReactionTool             = integrationtools.ReactionTool
 	SendTTSTool              = integrationtools.SendTTSTool
@@ -48,6 +49,24 @@ func NewFindSkillsTool(registryMgr *skills.RegistryManager, cache *skills.Search
 
 func NewInstallSkillTool(registryMgr *skills.RegistryManager, workspace string) *InstallSkillTool {
 	return integrationtools.NewInstallSkillTool(registryMgr, workspace)
+}
+
+func NewImageGenerateTool(
+	cfg *config.Config,
+	primaryModel string,
+	fallbacks []string,
+	maxCount int,
+	maxImageSize int,
+	store media.MediaStore,
+) *ImageGenerateTool {
+	return integrationtools.NewImageGenerateTool(
+		cfg,
+		primaryModel,
+		fallbacks,
+		maxCount,
+		maxImageSize,
+		store,
+	)
 }
 
 func NewMessageTool() *MessageTool {

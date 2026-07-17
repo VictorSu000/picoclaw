@@ -57,6 +57,14 @@ func (p *HTTPProvider) Chat(
 	return p.delegate.Chat(ctx, messages, tools, model, options)
 }
 
+func (p *HTTPProvider) GenerateImage(
+	ctx context.Context,
+	model string,
+	request ImageGenerationRequest,
+) (*ImageGenerationResponse, error) {
+	return p.delegate.GenerateImage(ctx, model, request)
+}
+
 // ChatStream implements providers.StreamingProvider by delegating to the
 // OpenAI-compatible streaming endpoint (SSE with stream: true).
 func (p *HTTPProvider) ChatStream(

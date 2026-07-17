@@ -33,6 +33,7 @@ export interface ModelInfo {
   is_default: boolean
   is_virtual: boolean
   is_vision_fallback: boolean
+  is_image_generation: boolean
   default_model_allowed?: boolean
 }
 
@@ -59,6 +60,7 @@ interface ModelsListResponse {
   total: number
   default_model: string
   vision_fallback_model: string
+  image_generation_model: string
   provider_options: ModelProviderOption[]
 }
 
@@ -67,6 +69,7 @@ interface ModelActionResponse {
   index?: number
   default_model?: string
   vision_fallback_model?: string
+  image_generation_model?: string
 }
 
 const BASE_URL = ""
@@ -134,6 +137,22 @@ export async function setVisionFallbackModel(
 ): Promise<ModelActionResponse> {
   const response = await request<ModelActionResponse>(
     "/api/models/vision-fallback",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model_name: modelName }),
+    },
+  )
+
+  await refreshGatewayState()
+  return response
+}
+
+export async function setImageGenerationModel(
+  modelName: string,
+): Promise<ModelActionResponse> {
+  const response = await request<ModelActionResponse>(
+    "/api/models/image-generation",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },

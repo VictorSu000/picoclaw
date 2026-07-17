@@ -28,6 +28,7 @@ func (h *Handler) registerModelRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/models", h.handleAddModel)
 	mux.HandleFunc("POST /api/models/default", h.handleSetDefaultModel)
 	mux.HandleFunc("POST /api/models/vision-fallback", h.handleSetVisionFallbackModel)
+	mux.HandleFunc("POST /api/models/image-generation", h.handleSetImageGenerationModel)
 	mux.HandleFunc("PUT /api/models/{index}", h.handleUpdateModel)
 	mux.HandleFunc("DELETE /api/models/{index}", h.handleDeleteModel)
 	mux.HandleFunc("POST /api/models/{index}/test", h.handleTestModel)
@@ -64,6 +65,7 @@ type modelResponse struct {
 	IsDefault           bool   `json:"is_default"`
 	IsVirtual           bool   `json:"is_virtual"`
 	IsVisionFallback    bool   `json:"is_vision_fallback"`
+	IsImageGeneration   bool   `json:"is_image_generation"`
 	DefaultModelAllowed bool   `json:"default_model_allowed"`
 }
 
@@ -284,6 +286,7 @@ func (h *Handler) handleListModels(w http.ResponseWriter, r *http.Request) {
 
 	defaultModel := cfg.Agents.Defaults.GetModelName()
 	visionFallbackModel := strings.TrimSpace(cfg.Agents.Defaults.VisionFallbackModel)
+	imageGenerationModel := strings.TrimSpace(cfg.Agents.Defaults.ImageGenerationModel)
 	modelStatuses := make([]modelConfigurationSummary, len(cfg.ModelList))
 
 	var wg sync.WaitGroup
@@ -325,17 +328,19 @@ func (h *Handler) handleListModels(w http.ResponseWriter, r *http.Request) {
 			IsDefault:           m.ModelName == defaultModel,
 			IsVirtual:           m.IsVirtual(),
 			IsVisionFallback:    m.ModelName == visionFallbackModel,
+			IsImageGeneration:   m.ModelName == imageGenerationModel,
 			DefaultModelAllowed: defaultModelAllowedForModelConfig(m),
 		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"models":                models,
-		"total":                 len(models),
-		"default_model":         defaultModel,
-		"vision_fallback_model": visionFallbackModel,
-		"provider_options":      modelProviderOptionsForResponse(),
+		"models":                 models,
+		"total":                  len(models),
+		"default_model":          defaultModel,
+		"vision_fallback_model":  visionFallbackModel,
+		"image_generation_model": imageGenerationModel,
+		"provider_options":       modelProviderOptionsForResponse(),
 	})
 }
 
@@ -522,6 +527,14 @@ func (h *Handler) handleUpdateModel(w http.ResponseWriter, r *http.Request) {
 			cfg.Agents.Defaults.VisionFallbackModel = ""
 		}
 	}
+	if cfg.Agents.Defaults.ImageGenerationModel == existingModelName {
+		if mc.HasTag(config.ModelTagImageGeneration) && !mc.IsVirtual() {
+			cfg.Agents.Defaults.ImageGenerationModel = mc.ModelName
+		} else {
+			cfg.Agents.Defaults.ImageGenerationModel = ""
+			cfg.Tools.ImageGenerate.Enabled = false
+		}
+	}
 
 	cfg.ModelList[idx] = &mc.ModelConfig
 	normalizeStoredModelProviders(cfg)
@@ -568,6 +581,10 @@ func (h *Handler) handleDeleteModel(w http.ResponseWriter, r *http.Request) {
 	}
 	if cfg.Agents.Defaults.VisionFallbackModel == deletedModelName {
 		cfg.Agents.Defaults.VisionFallbackModel = ""
+	}
+	if cfg.Agents.Defaults.ImageGenerationModel == deletedModelName {
+		cfg.Agents.Defaults.ImageGenerationModel = ""
+		cfg.Tools.ImageGenerate.Enabled = false
 	}
 
 	if err := config.SaveConfig(h.configPath, cfg); err != nil {
@@ -719,6 +736,70 @@ func (h *Handler) handleSetVisionFallbackModel(w http.ResponseWriter, r *http.Re
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":                "ok",
 		"vision_fallback_model": req.ModelName,
+	})
+}
+
+// handleSetImageGenerationModel configures the model used by image_generate.
+// The selected model is independent from image_model, which remains the
+// dedicated vision-input chat model override. An empty model_name clears it.
+//
+//	POST /api/models/image-generation
+func (h *Handler) handleSetImageGenerationModel(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	var req struct {
+		ModelName string `json:"model_name"`
+	}
+	if err = json.Unmarshal(body, &req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+	req.ModelName = strings.TrimSpace(req.ModelName)
+
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if req.ModelName != "" {
+		found := false
+		for _, model := range cfg.ModelList {
+			if model == nil || model.ModelName != req.ModelName {
+				continue
+			}
+			found = true
+			if model.IsVirtual() {
+				http.Error(w, fmt.Sprintf("Cannot use virtual model %q for image generation", req.ModelName), http.StatusBadRequest)
+				return
+			}
+			if !model.HasTag(config.ModelTagImageGeneration) {
+				http.Error(w, fmt.Sprintf("Model %q must have the %q tag", req.ModelName, config.ModelTagImageGeneration), http.StatusBadRequest)
+				return
+			}
+		}
+		if !found {
+			http.Error(w, fmt.Sprintf("Model %q not found in model_list", req.ModelName), http.StatusNotFound)
+			return
+		}
+	}
+
+	cfg.Agents.Defaults.ImageGenerationModel = req.ModelName
+	cfg.Tools.ImageGenerate.Enabled = req.ModelName != ""
+	if err = config.SaveConfig(h.configPath, cfg); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to save config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":                 "ok",
+		"image_generation_model": req.ModelName,
 	})
 }
 

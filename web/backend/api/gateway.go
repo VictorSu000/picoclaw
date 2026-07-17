@@ -422,6 +422,16 @@ func computeConfigSignature(cfg *config.Config) string {
 	if visionFallbackModel != "" {
 		parts = append(parts, "vision_fallback:"+visionFallbackModel)
 	}
+	imageGenerationModel := strings.TrimSpace(cfg.Agents.Defaults.ImageGenerationModel)
+	if imageGenerationModel != "" {
+		parts = append(parts, "image_generation_model:"+imageGenerationModel)
+	}
+	if len(cfg.Agents.Defaults.ImageGenerationModelFallbacks) > 0 {
+		parts = append(parts, "image_generation_fallbacks:"+strings.Join(
+			cfg.Agents.Defaults.ImageGenerationModelFallbacks,
+			",",
+		))
+	}
 	modelStreamingSignatures := computeModelStreamingSignatures(cfg)
 	if len(modelStreamingSignatures) > 0 {
 		parts = append(parts, "model_streaming:"+strings.Join(modelStreamingSignatures, ","))
@@ -463,6 +473,12 @@ func computeConfigSignature(cfg *config.Config) string {
 	}
 	if cfg.Tools.SendFile.Enabled {
 		toolSignatures = append(toolSignatures, "send_file")
+	}
+	if cfg.Tools.ImageGenerate.Enabled {
+		toolSignatures = append(toolSignatures, fmt.Sprintf(
+			"image_generate:%d",
+			cfg.Tools.ImageGenerate.GetMaxCount(),
+		))
 	}
 	if cfg.Tools.FindSkills.Enabled {
 		toolSignatures = append(toolSignatures, "find_skills")

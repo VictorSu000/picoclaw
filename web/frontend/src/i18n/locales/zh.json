@@ -286,6 +286,13 @@
       "noOptions": "请先为一个可用模型添加 vision 标签，再在此选择。",
       "saveSuccess": "备用视觉模型已更新。"
     },
+    "imageGeneration": {
+      "label": "图像生成模型",
+      "description": "供 image_generate 工具通过 OpenAI 兼容图像接口调用；选择模型后会启用该工具。",
+      "none": "未配置",
+      "noOptions": "请先为一个模型添加 image_generation 标签，再在此选择。",
+      "saveSuccess": "图像生成模型已更新。"
+    },
     "status": {
       "available": "可用",
       "unconfigured": "未配置",
@@ -294,7 +301,8 @@
     "badge": {
       "default": "默认",
       "virtual": "虚拟",
-      "visionFallback": "视觉备用"
+      "visionFallback": "视觉备用",
+      "imageGeneration": "图像生成"
     },
     "action": {
       "edit": "编辑 API Key",

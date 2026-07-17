@@ -103,6 +103,11 @@ export function ModelCard({
               {t("models.badge.visionFallback")}
             </span>
           )}
+          {model.is_image_generation && (
+            <span className="shrink-0 rounded bg-purple-500/10 px-1.5 py-0.5 text-[10px] leading-none font-medium text-purple-600 dark:text-purple-400">
+              {t("models.badge.imageGeneration")}
+            </span>
+          )}
         </div>
 
         <div className="flex shrink-0 items-center gap-0.5">

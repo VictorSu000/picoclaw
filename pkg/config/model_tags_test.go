@@ -52,3 +52,20 @@ func TestAgentDefaultsVisionFallbackModelJSON(t *testing.T) {
 		t.Fatalf("VisionFallbackModel = %q, want conditional-vision", defaults.VisionFallbackModel)
 	}
 }
+
+func TestAgentDefaultsImageGenerationModelJSON(t *testing.T) {
+	var defaults AgentDefaults
+	if err := json.Unmarshal(
+		[]byte(`{"image_generation_model":"image-gen","image_generation_model_fallbacks":["image-gen-2"]}`),
+		&defaults,
+	); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if defaults.ImageGenerationModel != "image-gen" {
+		t.Fatalf("ImageGenerationModel = %q, want image-gen", defaults.ImageGenerationModel)
+	}
+	if len(defaults.ImageGenerationModelFallbacks) != 1 ||
+		defaults.ImageGenerationModelFallbacks[0] != "image-gen-2" {
+		t.Fatalf("ImageGenerationModelFallbacks = %#v, want [image-gen-2]", defaults.ImageGenerationModelFallbacks)
+	}
+}

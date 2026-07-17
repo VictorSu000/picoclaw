@@ -8,19 +8,22 @@ import (
 )
 
 type (
-	ToolCall               = protocoltypes.ToolCall
-	FunctionCall           = protocoltypes.FunctionCall
-	LLMResponse            = protocoltypes.LLMResponse
-	StreamChunk            = protocoltypes.StreamChunk
-	UsageInfo              = protocoltypes.UsageInfo
-	Message                = protocoltypes.Message
-	ToolDefinition         = protocoltypes.ToolDefinition
-	ToolFunctionDefinition = protocoltypes.ToolFunctionDefinition
-	ExtraContent           = protocoltypes.ExtraContent
-	GoogleExtra            = protocoltypes.GoogleExtra
-	ContentBlock           = protocoltypes.ContentBlock
-	CacheControl           = protocoltypes.CacheControl
-	Attachment             = protocoltypes.Attachment
+	ToolCall                = protocoltypes.ToolCall
+	FunctionCall            = protocoltypes.FunctionCall
+	LLMResponse             = protocoltypes.LLMResponse
+	StreamChunk             = protocoltypes.StreamChunk
+	UsageInfo               = protocoltypes.UsageInfo
+	Message                 = protocoltypes.Message
+	ToolDefinition          = protocoltypes.ToolDefinition
+	ToolFunctionDefinition  = protocoltypes.ToolFunctionDefinition
+	ExtraContent            = protocoltypes.ExtraContent
+	GoogleExtra             = protocoltypes.GoogleExtra
+	ContentBlock            = protocoltypes.ContentBlock
+	CacheControl            = protocoltypes.CacheControl
+	Attachment              = protocoltypes.Attachment
+	ImageGenerationRequest  = protocoltypes.ImageGenerationRequest
+	GeneratedImage          = protocoltypes.GeneratedImage
+	ImageGenerationResponse = protocoltypes.ImageGenerationResponse
 )
 
 type LLMProvider interface {
@@ -37,6 +40,17 @@ type LLMProvider interface {
 type StatefulProvider interface {
 	LLMProvider
 	Close()
+}
+
+// ImageGenerationProvider is an optional provider capability for OpenAI-style
+// image generation endpoints. It is intentionally separate from Chat so an
+// image-only model cannot accidentally be used as the agent's chat model.
+type ImageGenerationProvider interface {
+	GenerateImage(
+		ctx context.Context,
+		model string,
+		request ImageGenerationRequest,
+	) (*ImageGenerationResponse, error)
 }
 
 // StreamingProvider is an optional interface for providers that support token streaming.

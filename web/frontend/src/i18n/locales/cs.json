@@ -260,6 +260,13 @@
       "noOptions": "Pro výběr zde přidejte dostupnému modelu tag vision.",
       "saveSuccess": "Záložní model pro obraz byl aktualizován."
     },
+    "imageGeneration": {
+      "label": "Model generování obrázků",
+      "description": "Používá jej image_generate přes obrazový endpoint kompatibilní s OpenAI. Výběrem modelu nástroj povolíte.",
+      "none": "Nenastaveno",
+      "noOptions": "Pro výběr zde přidejte modelu tag image_generation.",
+      "saveSuccess": "Model generování obrázků byl aktualizován."
+    },
     "status": {
       "available": "Dostupný",
       "unconfigured": "Nenakonfigurován",
@@ -268,7 +275,8 @@
     "badge": {
       "default": "Výchozí",
       "virtual": "Virtuální",
-      "visionFallback": "Záloha pro obraz"
+      "visionFallback": "Záloha pro obraz",
+      "imageGeneration": "Generování obrázků"
     },
     "action": {
       "edit": "Upravit API klíč",
