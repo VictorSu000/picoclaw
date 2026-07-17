@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"mime"
 	"net/http"
 	"net/url"
@@ -23,6 +25,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/identity"
 	"github.com/sipeed/picoclaw/pkg/logger"
+	"github.com/sipeed/picoclaw/pkg/media"
 	"github.com/sipeed/picoclaw/pkg/utils"
 )
 
@@ -34,6 +37,20 @@ type picoConn struct {
 	writeMu   sync.Mutex
 	closed    atomic.Bool
 	cancel    context.CancelFunc // cancels per-connection goroutines (e.g. pingLoop)
+}
+
+type picoUpload struct {
+	ref       string
+	scope     string
+	sessionID string
+}
+
+type picoUploadResponse struct {
+	Type        string `json:"type"`
+	URL         string `json:"url"`
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type"`
+	Size        int64  `json:"size"`
 }
 
 var allowedInlineImageMIMETypes = map[string]struct{}{
@@ -105,6 +122,9 @@ type PicoChannel struct {
 	cancel             context.CancelFunc
 	progress           *channels.ToolFeedbackAnimator
 	deleteMessageFn    func(context.Context, string, string) error
+	maxUploadSize      int64
+	uploads            map[string]picoUpload
+	uploadsMu          sync.RWMutex
 }
 
 // NewPicoChannel creates a new Pico Protocol channel.
@@ -144,10 +164,20 @@ func NewPicoChannel(
 		},
 		connections:        make(map[string]*picoConn),
 		sessionConnections: make(map[string]map[string]*picoConn),
+		maxUploadSize:      config.DefaultMaxMediaSize,
+		uploads:            make(map[string]picoUpload),
 	}
 	ch.progress = channels.NewToolFeedbackAnimator(ch.EditMessage)
 	ch.deleteMessageFn = ch.DeleteMessage
 	return ch, nil
+}
+
+// SetMaxUploadSize updates the maximum accepted Web UI attachment size.
+func (c *PicoChannel) SetMaxUploadSize(maxSize int) {
+	if maxSize <= 0 {
+		maxSize = config.DefaultMaxMediaSize
+	}
+	c.maxUploadSize = int64(maxSize)
 }
 
 // createAndAddConnection checks MaxConnections and registers a connection atomically.
@@ -268,6 +298,7 @@ func (c *PicoChannel) Stop(ctx context.Context) error {
 	if c.progress != nil {
 		c.progress.StopAll()
 	}
+	c.releaseAllUploads()
 
 	logger.InfoC("pico", "Pico Protocol channel stopped")
 	return nil
@@ -283,9 +314,22 @@ func (c *PicoChannel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch path {
 	case "/ws", "/ws/":
 		c.handleWebSocket(w, r)
+	case "/media", "/media/":
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		c.handleMediaUpload(w, r)
 	default:
 		if strings.HasPrefix(path, "/media/") {
-			c.handleMediaDownload(w, r)
+			switch r.Method {
+			case http.MethodGet, http.MethodHead:
+				c.handleMediaDownload(w, r)
+			case http.MethodDelete:
+				c.handleMediaDelete(w, r)
+			default:
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			}
 			return
 		}
 		http.NotFound(w, r)
@@ -870,6 +914,246 @@ func picoAllowsInlineDisplay(filename, contentType string) bool {
 	return picoInferAttachmentType(filename, contentType) == "image"
 }
 
+func (c *PicoChannel) handleMediaUpload(w http.ResponseWriter, r *http.Request) {
+	if !c.IsRunning() {
+		http.Error(w, "channel not running", http.StatusServiceUnavailable)
+		return
+	}
+	if !c.authenticate(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	store := c.GetMediaStore()
+	if store == nil {
+		http.Error(w, "media store unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	maxSize := c.maxUploadSize
+	if maxSize <= 0 {
+		maxSize = config.DefaultMaxMediaSize
+	}
+	maxBodySize := maxSize + 1024*1024
+	if r.ContentLength > maxBodySize {
+		http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
+	if err := r.ParseMultipartForm(maxBodySize); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, "invalid multipart upload", http.StatusBadRequest)
+		return
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+
+	sessionID := strings.TrimSpace(r.FormValue("session_id"))
+	if sessionID == "" || len(sessionID) > 256 {
+		http.Error(w, "invalid session_id", http.StatusBadRequest)
+		return
+	}
+
+	source, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "file is required", http.StatusBadRequest)
+		return
+	}
+	defer source.Close()
+	if header.Size > maxSize {
+		http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+
+	filename := picoSafeUploadFilename(header.Filename)
+	if err := os.MkdirAll(media.TempDir(), 0o700); err != nil {
+		http.Error(w, "failed to prepare upload directory", http.StatusInternalServerError)
+		return
+	}
+	tempFile, err := os.CreateTemp(media.TempDir(), picoUploadTempPattern(filename))
+	if err != nil {
+		http.Error(w, "failed to create upload", http.StatusInternalServerError)
+		return
+	}
+	tempPath := tempFile.Name()
+	keepTempFile := false
+	defer func() {
+		_ = tempFile.Close()
+		if !keepTempFile {
+			_ = os.Remove(tempPath)
+		}
+	}()
+
+	written, copyErr := io.Copy(tempFile, io.LimitReader(source, maxSize+1))
+	closeErr := tempFile.Close()
+	if copyErr != nil || closeErr != nil {
+		http.Error(w, "failed to store upload", http.StatusInternalServerError)
+		return
+	}
+	if written > maxSize {
+		http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+
+	contentType := picoUploadContentType(tempPath, filename, header.Header.Get("Content-Type"))
+	uploadID := uuid.New().String()
+	scope := channels.BuildMediaScope("pico", "pico:"+sessionID, "upload:"+uploadID)
+	ref, err := store.Store(tempPath, media.MediaMeta{
+		Filename:      filename,
+		ContentType:   contentType,
+		Source:        "pico:upload",
+		CleanupPolicy: media.CleanupPolicyDeleteOnCleanup,
+	}, scope)
+	if err != nil {
+		http.Error(w, "failed to register upload", http.StatusInternalServerError)
+		return
+	}
+	keepTempFile = true
+
+	refID, err := picoMediaRefID(ref)
+	if err != nil {
+		_ = store.ReleaseAll(scope)
+		http.Error(w, "failed to register upload", http.StatusInternalServerError)
+		return
+	}
+	c.uploadsMu.Lock()
+	c.uploads[refID] = picoUpload{ref: ref, scope: scope, sessionID: sessionID}
+	c.uploadsMu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(picoUploadResponse{
+		Type:        picoInferAttachmentType(filename, contentType),
+		URL:         "/pico/media/" + url.PathEscape(refID),
+		Filename:    filename,
+		ContentType: contentType,
+		Size:        written,
+	})
+}
+
+func picoSafeUploadFilename(filename string) string {
+	filename = filepath.Base(strings.ReplaceAll(strings.TrimSpace(filename), "\\", "/"))
+	filename = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return '_'
+		}
+		return r
+	}, filename)
+	if filename == "" || filename == "." {
+		return "attachment"
+	}
+	return filename
+}
+
+func picoUploadTempPattern(filename string) string {
+	extension := strings.ToLower(filepath.Ext(filename))
+	if len(extension) < 2 || len(extension) > 16 {
+		return "pico-upload-*"
+	}
+	for _, r := range extension[1:] {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') {
+			return "pico-upload-*"
+		}
+	}
+	return "pico-upload-*" + extension
+}
+
+func picoUploadContentType(localPath, filename, declared string) string {
+	file, err := os.Open(localPath)
+	if err == nil {
+		defer file.Close()
+		buffer := make([]byte, 512)
+		read, readErr := file.Read(buffer)
+		if readErr == nil || errors.Is(readErr, io.EOF) {
+			detected := http.DetectContentType(buffer[:read])
+			if detected != "application/octet-stream" {
+				return detected
+			}
+		}
+	}
+	if extensionType := mime.TypeByExtension(filepath.Ext(filename)); extensionType != "" {
+		if parsed, _, err := mime.ParseMediaType(extensionType); err == nil {
+			return parsed
+		}
+	}
+	if parsed, _, err := mime.ParseMediaType(declared); err == nil && parsed != "" {
+		return parsed
+	}
+	return "application/octet-stream"
+}
+
+func (c *PicoChannel) handleMediaDelete(w http.ResponseWriter, r *http.Request) {
+	if !c.IsRunning() {
+		http.Error(w, "channel not running", http.StatusServiceUnavailable)
+		return
+	}
+	if !c.authenticate(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	refID := picoRefIDFromMediaPath(r.URL.Path)
+	sessionID := strings.TrimSpace(r.URL.Query().Get("session_id"))
+	if refID == "" || sessionID == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	c.uploadsMu.Lock()
+	upload, ok := c.uploads[refID]
+	if ok && upload.sessionID == sessionID {
+		delete(c.uploads, refID)
+	} else {
+		ok = false
+	}
+	c.uploadsMu.Unlock()
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
+	store := c.GetMediaStore()
+	if store != nil {
+		_ = store.ReleaseAll(upload.scope)
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (c *PicoChannel) releaseAllUploads() {
+	c.uploadsMu.Lock()
+	uploads := make([]picoUpload, 0, len(c.uploads))
+	for _, upload := range c.uploads {
+		uploads = append(uploads, upload)
+	}
+	clear(c.uploads)
+	c.uploadsMu.Unlock()
+
+	store := c.GetMediaStore()
+	if store == nil {
+		return
+	}
+	for _, upload := range uploads {
+		_ = store.ReleaseAll(upload.scope)
+	}
+}
+
+func picoRefIDFromMediaPath(path string) string {
+	const prefix = "/pico/media/"
+	if !strings.HasPrefix(path, prefix) {
+		return ""
+	}
+	refID := strings.TrimSpace(strings.TrimPrefix(path, prefix))
+	if refID == "" || strings.Contains(refID, "/") {
+		return ""
+	}
+	return refID
+}
+
 func (c *PicoChannel) handleMediaDownload(w http.ResponseWriter, r *http.Request) {
 	if !c.IsRunning() {
 		http.Error(w, "channel not running", http.StatusServiceUnavailable)
@@ -880,7 +1164,7 @@ func (c *PicoChannel) handleMediaDownload(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	refID := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, "/pico/media/"), "/"))
+	refID := picoRefIDFromMediaPath(r.URL.Path)
 	if refID == "" {
 		http.NotFound(w, r)
 		return
@@ -929,6 +1213,7 @@ func (c *PicoChannel) handleMediaDownload(w http.ResponseWriter, r *http.Request
 		w.Header().Set("Content-Disposition", cd)
 	}
 	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	http.ServeContent(w, r, filename, info.ModTime(), file)
 }
 
@@ -1170,7 +1455,11 @@ func (c *PicoChannel) handleMessage(pc *picoConn, msg PicoMessage) {
 // handleMessageSend processes an inbound message.send from a client.
 func (c *PicoChannel) handleMessageSend(pc *picoConn, msg PicoMessage) {
 	content, _ := msg.Payload["content"].(string)
-	media, err := parseInlineImageMedia(msg.Payload)
+	sessionID := msg.SessionID
+	if sessionID == "" {
+		sessionID = pc.sessionID
+	}
+	media, err := c.parseInboundMedia(msg.Payload, sessionID)
 	if err != nil {
 		errMsg := newErrorWithPayload("invalid_media", err.Error(), map[string]any{
 			"request_id": msg.ID,
@@ -1185,11 +1474,6 @@ func (c *PicoChannel) handleMessageSend(pc *picoConn, msg PicoMessage) {
 		})
 		pc.writeJSON(errMsg)
 		return
-	}
-
-	sessionID := msg.SessionID
-	if sessionID == "" {
-		sessionID = pc.sessionID
 	}
 
 	chatID := "pico:" + sessionID
@@ -1255,6 +1539,69 @@ func parseInlineImageMedia(payload map[string]any) ([]string, error) {
 	media = append(media, attachments...)
 
 	return media, nil
+}
+
+func (c *PicoChannel) parseInboundMedia(payload map[string]any, sessionID string) ([]string, error) {
+	inlineMedia, err := parseInlineImageMedia(payload)
+	if err != nil {
+		return nil, err
+	}
+	uploadedMedia, err := c.parseUploadedMediaAttachments(payload["attachments"], sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return append(inlineMedia, uploadedMedia...), nil
+}
+
+func (c *PicoChannel) parseUploadedMediaAttachments(raw any, sessionID string) ([]string, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	values, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("attachments must be an array")
+	}
+
+	refs := make([]string, 0, len(values))
+	for i, item := range values {
+		attachment, ok := item.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("attachments[%d]: attachment must be an object", i)
+		}
+		rawURL, _ := attachment["url"].(string)
+		rawURL = strings.TrimSpace(rawURL)
+		if rawURL == "" || strings.HasPrefix(rawURL, "data:") {
+			continue
+		}
+
+		parsedURL, err := url.Parse(rawURL)
+		if err != nil || parsedURL.IsAbs() || parsedURL.Host != "" || parsedURL.RawQuery != "" || parsedURL.Fragment != "" {
+			return nil, fmt.Errorf("attachments[%d]: invalid uploaded media URL", i)
+		}
+		refID := picoRefIDFromMediaPath(parsedURL.Path)
+		if refID == "" {
+			return nil, fmt.Errorf("attachments[%d]: attachment was not uploaded by Pico", i)
+		}
+
+		c.uploadsMu.RLock()
+		upload, exists := c.uploads[refID]
+		c.uploadsMu.RUnlock()
+		if !exists || upload.sessionID != sessionID {
+			return nil, fmt.Errorf("attachments[%d]: attachment is unavailable for this session", i)
+		}
+		store := c.GetMediaStore()
+		if store == nil {
+			return nil, fmt.Errorf("attachments[%d]: media store unavailable", i)
+		}
+		if _, _, err := store.ResolveWithMeta(upload.ref); err != nil {
+			c.uploadsMu.Lock()
+			delete(c.uploads, refID)
+			c.uploadsMu.Unlock()
+			return nil, fmt.Errorf("attachments[%d]: attachment has expired", i)
+		}
+		refs = append(refs, upload.ref)
+	}
+	return refs, nil
 }
 
 func parseInlineImageValues(raw any) ([]string, error) {

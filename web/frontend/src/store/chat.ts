@@ -18,6 +18,8 @@ export interface ChatAttachment {
   url: string
   filename?: string
   contentType?: string
+  size?: number
+  uploadSessionId?: string
 }
 
 export interface ChatToolCallFunction {

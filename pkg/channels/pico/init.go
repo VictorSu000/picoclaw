@@ -23,6 +23,7 @@ func init() {
 			if err != nil {
 				return nil, err
 			}
+			ch.SetMaxUploadSize(cfg.Agents.Defaults.GetMaxMediaSize())
 			if channelName != config.ChannelPico {
 				ch.SetName(channelName)
 			}

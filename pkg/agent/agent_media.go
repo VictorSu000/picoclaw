@@ -229,6 +229,33 @@ func buildProviderAttachments(store media.MediaStore, refs []string) []providers
 	return attachments
 }
 
+func buildInboundProviderAttachments(store media.MediaStore, refs []string) []providers.Attachment {
+	if store == nil || len(refs) == 0 {
+		return nil
+	}
+
+	attachments := make([]providers.Attachment, 0, len(refs))
+	for _, ref := range refs {
+		if !strings.HasPrefix(ref, "media://") {
+			continue
+		}
+		_, meta, err := store.ResolveWithMeta(ref)
+		if err != nil {
+			continue
+		}
+		attachments = append(attachments, providers.Attachment{
+			Type:        inferMediaType(meta.Filename, meta.ContentType),
+			Ref:         ref,
+			Filename:    meta.Filename,
+			ContentType: meta.ContentType,
+		})
+	}
+	if len(attachments) == 0 {
+		return nil
+	}
+	return attachments
+}
+
 // detectMIME determines the MIME type from metadata or magic-bytes detection.
 // Returns empty string if detection fails.
 func detectMIME(localPath string, meta media.MediaMeta) string {

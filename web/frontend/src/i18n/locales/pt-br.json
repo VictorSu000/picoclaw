@@ -132,6 +132,13 @@
     "invalidImage": "\"{{name}}\" não é um arquivo de imagem suportado.",
     "imageTooLarge": "\"{{name}}\" excede o limite de {{size}}.",
     "imageReadFailed": "Falha ao ler \"{{name}}\".",
+    "attachFile": "Adicionar anexos",
+    "dropAttachmentsActive": "Solte para adicionar anexos",
+    "removeAttachment": "Remover anexo",
+    "attachedFile": "Arquivo anexado",
+    "fileTooLarge": "\"{{name}}\" excede o limite de tamanho do arquivo.",
+    "fileUploadFailed": "Falha ao enviar \"{{name}}\".",
+    "downloadFile": "Baixar arquivo",
     "empty": {
       "noConfiguredModel": "Nenhum Modelo Configurado",
       "noConfiguredModelDescription": "Você precisa configurar pelo menos um modelo de IA com uma API Key antes de iniciar o chat.",

@@ -110,6 +110,13 @@
     "invalidImage": "\"{{name}}\" není podporovaný formát obrázku.",
     "imageTooLarge": "\"{{name}}\" překračuje limit {{size}}.",
     "imageReadFailed": "Čtení souboru \"{{name}}\" selhalo.",
+    "attachFile": "Přidat přílohy",
+    "dropAttachmentsActive": "Uvolněním přidáte přílohy",
+    "removeAttachment": "Odebrat přílohu",
+    "attachedFile": "Přiložený soubor",
+    "fileTooLarge": "Soubor \"{{name}}\" překračuje limit velikosti.",
+    "fileUploadFailed": "Nahrání souboru \"{{name}}\" selhalo.",
+    "downloadFile": "Stáhnout soubor",
     "empty": {
       "noConfiguredModel": "Žádný model není nakonfigurován",
       "noConfiguredModelDescription": "Před zahájením chatu musíte nakonfigurovat alespoň jeden AI model s API klíčem.",

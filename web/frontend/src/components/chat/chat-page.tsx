@@ -18,6 +18,7 @@ import {
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
+import { deleteChatFile, uploadChatFile } from "@/api/chat-media"
 import { AssistantMessage } from "@/components/chat/assistant-message"
 import {
   ChatComposer,
@@ -54,10 +55,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import {
-  CHAT_IMAGE_ACCEPT,
   buildChatImageAttachments,
   getTransferredFiles,
   hasFileTransfer,
+  isSupportedChatImage,
 } from "@/features/chat/image-input"
 import { useAgentPresets } from "@/hooks/use-agent-presets"
 import { useChatModels } from "@/hooks/use-chat-models"
@@ -194,6 +195,7 @@ export function ChatPage() {
   const [input, setInput] = useState("")
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
   const [isDragActive, setIsDragActive] = useState(false)
+  const [isUploadingAttachments, setIsUploadingAttachments] = useState(false)
   const [assistantDetailVisibility, setAssistantDetailVisibility] = useAtom(
     assistantDetailVisibilityAtom,
   )
@@ -227,6 +229,13 @@ export function ChatPage() {
     forkChat,
     deleteMessageSeries,
   } = usePicoChat()
+  const activeSessionIdRef = useRef(activeSessionId)
+
+  useEffect(() => {
+    activeSessionIdRef.current = activeSessionId
+    setInput("")
+    setAttachments([])
+  }, [activeSessionId])
 
   const { state: gwState } = useGateway()
   const isGatewayRunning = gwState === "running"
@@ -298,7 +307,12 @@ export function ChatPage() {
   }, [messages, isTyping, isAtBottom])
 
   const handleSend = () => {
-    if ((!input.trim() && attachments.length === 0) || !canInput) return
+    if (
+      (!input.trim() && attachments.length === 0) ||
+      !canInput ||
+      isUploadingAttachments
+    )
+      return
     if (
       sendMessage({
         content: input,
@@ -310,29 +324,61 @@ export function ChatPage() {
     }
   }
 
-  const handleAddImages = () => {
-    if (!canInput) return
+  const handleAddAttachments = () => {
+    if (!canInput || isUploadingAttachments) return
     fileInputRef.current?.click()
   }
 
   const handleRemoveAttachment = (index: number) => {
+    const removed = attachments[index]
     setAttachments((prev) => prev.filter((_, itemIndex) => itemIndex !== index))
+    if (removed?.uploadSessionId) {
+      void deleteChatFile(removed.url, removed.uploadSessionId).catch((error) => {
+        console.warn("Failed to remove uploaded attachment:", error)
+      })
+    }
   }
 
-  const appendImageFiles = async (files: readonly File[]) => {
-    if (!canInput || files.length === 0) {
+  const appendAttachmentFiles = async (files: readonly File[]) => {
+    if (!canInput || isUploadingAttachments || files.length === 0) {
       return
     }
 
-    const nextAttachments = await buildChatImageAttachments(files, t)
-    if (nextAttachments.length === 0) {
-      return
-    }
+    const uploadSessionId = activeSessionId
+    setIsUploadingAttachments(true)
+    try {
+      const imageFiles = files.filter(isSupportedChatImage)
+      const otherFiles = files.filter((file) => !isSupportedChatImage(file))
 
-    setAttachments((prev) => [...prev, ...nextAttachments])
+      const imageAttachments = await buildChatImageAttachments(imageFiles, t)
+      if (imageAttachments.length > 0) {
+        setAttachments((prev) => [...prev, ...imageAttachments])
+      }
+
+      for (const file of otherFiles) {
+        try {
+          const uploaded = await uploadChatFile(file, uploadSessionId)
+          if (activeSessionIdRef.current !== uploadSessionId) {
+            void deleteChatFile(uploaded.url, uploadSessionId)
+            continue
+          }
+          setAttachments((prev) => [...prev, uploaded])
+        } catch (error) {
+          const key =
+            error instanceof Error && error.message === "file_too_large"
+              ? "chat.fileTooLarge"
+              : "chat.fileUploadFailed"
+          toast.error(t(key, { name: file.name || t("chat.attachedFile") }))
+        }
+      }
+    } finally {
+      setIsUploadingAttachments(false)
+    }
   }
 
-  const handleImageSelection = async (event: ChangeEvent<HTMLInputElement>) => {
+  const handleAttachmentSelection = async (
+    event: ChangeEvent<HTMLInputElement>,
+  ) => {
     const files = Array.from(event.target.files ?? [])
     event.target.value = ""
 
@@ -340,7 +386,7 @@ export function ChatPage() {
       return
     }
 
-    await appendImageFiles(files)
+    await appendAttachmentFiles(files)
   }
 
   const resetDragState = () => {
@@ -356,7 +402,7 @@ export function ChatPage() {
       return
     }
 
-    await appendImageFiles(files)
+    await appendAttachmentFiles(files)
   }
 
   const handleComposerDragEnter = (event: DragEvent<HTMLDivElement>) => {
@@ -365,7 +411,7 @@ export function ChatPage() {
     }
 
     event.preventDefault()
-    if (!canInput) {
+    if (!canInput || isUploadingAttachments) {
       return
     }
     dragDepthRef.current += 1
@@ -378,7 +424,7 @@ export function ChatPage() {
     }
 
     event.preventDefault()
-    if (!canInput) {
+    if (!canInput || isUploadingAttachments) {
       resetDragState()
       return
     }
@@ -394,7 +440,8 @@ export function ChatPage() {
     }
 
     event.preventDefault()
-    event.dataTransfer.dropEffect = canInput ? "copy" : "none"
+    event.dataTransfer.dropEffect =
+      canInput && !isUploadingAttachments ? "copy" : "none"
   }
 
   const handleComposerDrop = async (event: DragEvent<HTMLDivElement>) => {
@@ -406,15 +453,17 @@ export function ChatPage() {
     const files = getTransferredFiles(event.dataTransfer)
     resetDragState()
 
-    if (!canInput || files.length === 0) {
+    if (!canInput || isUploadingAttachments || files.length === 0) {
       return
     }
 
-    await appendImageFiles(files)
+    await appendAttachmentFiles(files)
   }
 
   const canSubmit =
-    canInput && (Boolean(input.trim()) || attachments.length > 0)
+    canInput &&
+    !isUploadingAttachments &&
+    (Boolean(input.trim()) || attachments.length > 0)
 
   const [forkingMessageIndex, setForkingMessageIndex] = useState<number | null>(
     null,
@@ -708,17 +757,16 @@ export function ChatPage() {
       <input
         ref={fileInputRef}
         type="file"
-        accept={CHAT_IMAGE_ACCEPT}
         multiple
         className="hidden"
-        onChange={handleImageSelection}
+        onChange={handleAttachmentSelection}
       />
 
       <ChatComposer
         input={input}
         attachments={attachments}
         onInputChange={setInput}
-        onAddImages={handleAddImages}
+        onAddAttachments={handleAddAttachments}
         onPaste={handleComposerPaste}
         onDragEnter={handleComposerDragEnter}
         onDragLeave={handleComposerDragLeave}
@@ -734,6 +782,7 @@ export function ChatPage() {
         inputDisabledReason={inputDisabledReason}
         canSend={canSubmit}
         isDragActive={isDragActive}
+        isUploadingAttachments={isUploadingAttachments}
         contextUsage={contextUsage}
       />
 

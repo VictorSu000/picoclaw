@@ -24,8 +24,10 @@ func (h *Handler) registerPicoRoutes(mux *http.ServeMux) {
 	// This allows the frontend to connect via the same port as the web UI,
 	// avoiding the need to expose extra ports for WebSocket communication.
 	mux.HandleFunc("GET /pico/ws", h.handleWebSocketProxy())
+	mux.HandleFunc("POST /pico/media", h.handlePicoMediaProxy())
 	mux.HandleFunc("GET /pico/media/{id}", h.handlePicoMediaProxy())
 	mux.HandleFunc("HEAD /pico/media/{id}", h.handlePicoMediaProxy())
+	mux.HandleFunc("DELETE /pico/media/{id}", h.handlePicoMediaProxy())
 }
 
 // createWsProxy creates a reverse proxy to the current gateway WebSocket endpoint.

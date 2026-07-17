@@ -301,7 +301,9 @@ func rejectLauncherDashboardAuth(w http.ResponseWriter, r *http.Request, canonic
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	if strings.HasPrefix(canonicalPath, "/api/") {
+	if strings.HasPrefix(canonicalPath, "/api/") ||
+		canonicalPath == "/pico/media" ||
+		strings.HasPrefix(canonicalPath, "/pico/media/") {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"error":"unauthorized"}`))

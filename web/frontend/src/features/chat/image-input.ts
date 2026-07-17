@@ -28,8 +28,6 @@ const CHAT_IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
   ".bmp": "image/bmp",
 }
 
-export const CHAT_IMAGE_ACCEPT = CHAT_IMAGE_MIME_TYPES.join(",")
-
 const MAX_CHAT_IMAGE_SIZE_BYTES = 7 * 1024 * 1024
 const MAX_CHAT_IMAGE_SIZE_LABEL = "7 MB"
 
@@ -65,6 +63,10 @@ function getSupportedImageMimeType(file: File): string | null {
 
   const extension = getFileExtension(file.name)
   return CHAT_IMAGE_MIME_BY_EXTENSION[extension] ?? null
+}
+
+export function isSupportedChatImage(file: File): boolean {
+  return getSupportedImageMimeType(file) !== null
 }
 
 function normalizeImageFileForDataUrl(file: File, filename: string): File {

@@ -1,6 +1,7 @@
 import { IconCheck, IconCopy } from "@tabler/icons-react"
 import { useTranslation } from "react-i18next"
 
+import { FileAttachmentList } from "@/components/chat/file-attachment-list"
 import { Button } from "@/components/ui/button"
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 import { formatMessageTime } from "@/hooks/use-pico-chat"
@@ -25,6 +26,9 @@ export function UserMessage({
   const imageAttachments = attachments.filter(
     (attachment) => attachment.type === "image",
   )
+  const fileAttachments = attachments.filter(
+    (attachment) => attachment.type !== "image",
+  )
   const copyMessageLabel = isCopied
     ? t("chat.copiedLabel")
     : t("chat.copyMessage")
@@ -43,6 +47,16 @@ export function UserMessage({
               className="max-h-72 max-w-full object-cover"
             />
           ))}
+        </div>
+      )}
+
+      {fileAttachments.length > 0 && (
+        <div className="max-w-[70%]">
+          <FileAttachmentList
+            attachments={fileAttachments}
+            align="end"
+            compact
+          />
         </div>
       )}
 

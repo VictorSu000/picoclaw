@@ -111,6 +111,13 @@
     "invalidImage": "\"{{name}}\" একটি সমর্থিত ছবি ফাইল নয়।",
     "imageTooLarge": "\"{{name}}\" {{size}} সীমা অতিক্রম করেছে।",
     "imageReadFailed": "\"{{name}}\" পড়তে ব্যর্থ হয়েছে।",
+    "attachFile": "সংযুক্তি যোগ করুন",
+    "dropAttachmentsActive": "সংযুক্তি যোগ করতে ছেড়ে দিন",
+    "removeAttachment": "সংযুক্তি সরান",
+    "attachedFile": "সংযুক্ত ফাইল",
+    "fileTooLarge": "\"{{name}}\" ফাইলের আকার সীমা অতিক্রম করেছে।",
+    "fileUploadFailed": "\"{{name}}\" আপলোড করা যায়নি।",
+    "downloadFile": "ফাইল ডাউনলোড করুন",
     "empty": {
       "noConfiguredModel": "কোনো মডেল কনফিগার করা নেই",
       "noConfiguredModelDescription": "চ্যাট শুরু করার আগে আপনাকে কমপক্ষে একটি AI মডেল API কী দিয়ে কনফিগার করতে হবে।",
