@@ -48,6 +48,8 @@ func RunToolLoop(
 ) (*ToolLoopResult, error) {
 	iteration := 0
 	var finalContent string
+	availableMedia := append([]string(nil), ToolMediaRefs(ctx)...)
+	availableMedia = appendUniqueToolLoopMediaRefs(availableMedia, collectToolLoopMediaRefs(messages)...)
 
 	for iteration < config.MaxIterations {
 		iteration++
@@ -188,7 +190,8 @@ func RunToolLoop(
 
 				var toolResult *ToolResult
 				if config.Tools != nil {
-					toolResult = config.Tools.ExecuteWithContext(ctx, tc.Name, tc.Arguments, channel, chatID, nil)
+					toolCtx := WithToolMediaRefs(ctx, availableMedia)
+					toolResult = config.Tools.ExecuteWithContext(toolCtx, tc.Name, tc.Arguments, channel, chatID, nil)
 				} else {
 					toolResult = ErrorResult("No tools available")
 				}
@@ -199,6 +202,7 @@ func RunToolLoop(
 
 		// Append results in original order
 		for _, r := range results {
+			availableMedia = appendUniqueToolLoopMediaRefs(availableMedia, r.result.Media...)
 			contentForLLM := r.result.ContentForLLM()
 
 			toolMsg := providers.Message{
@@ -217,4 +221,30 @@ func RunToolLoop(
 		Content:    finalContent,
 		Iterations: iteration,
 	}, nil
+}
+
+func collectToolLoopMediaRefs(messages []providers.Message) []string {
+	refs := make([]string, 0)
+	for _, message := range messages {
+		refs = appendUniqueToolLoopMediaRefs(refs, message.Media...)
+	}
+	return refs
+}
+
+func appendUniqueToolLoopMediaRefs(refs []string, additions ...string) []string {
+	seen := make(map[string]struct{}, len(refs)+len(additions))
+	for _, ref := range refs {
+		seen[ref] = struct{}{}
+	}
+	for _, ref := range additions {
+		if ref == "" {
+			continue
+		}
+		if _, exists := seen[ref]; exists {
+			continue
+		}
+		seen[ref] = struct{}{}
+		refs = append(refs, ref)
+	}
+	return refs
 }

@@ -10,12 +10,17 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/h2non/filetype"
+
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/media"
 	"github.com/sipeed/picoclaw/pkg/providers"
 )
 
-const maxImageGenerationPromptRunes = 32000
+const (
+	maxImageGenerationPromptRunes = 32000
+	maxImageGenerationInputImages = 4
+)
 
 var imageGenerationSizePattern = regexp.MustCompile(`^(?:auto|[1-9][0-9]{0,4}x[1-9][0-9]{0,4})$`)
 
@@ -55,7 +60,7 @@ func NewImageGenerateTool(
 func (t *ImageGenerateTool) Name() string { return "image_generate" }
 
 func (t *ImageGenerateTool) Description() string {
-	return "Generate images from a text prompt using the configured image generation model and send them to the current chat."
+	return "Generate an image from a text prompt, or edit current-turn reference images with a prompt, using the configured image model and send the result to the current chat."
 }
 
 func (t *ImageGenerateTool) Parameters() map[string]any {
@@ -94,6 +99,22 @@ func (t *ImageGenerateTool) Parameters() map[string]any {
 				"type":        "string",
 				"description": "Optional background hint. Transparent output requires png or webp.",
 				"enum":        []string{"transparent", "opaque", "auto"},
+			},
+			"input_images": map[string]any{
+				"type":        "array",
+				"description": "Optional MediaStore references or image paths shown in the current turn. Supplying images switches to image editing/reference generation.",
+				"items":       map[string]any{"type": "string"},
+				"minItems":    1,
+				"maxItems":    maxImageGenerationInputImages,
+			},
+			"mask": map[string]any{
+				"type":        "string",
+				"description": "Optional MediaStore reference or current-turn image path for an edit mask. It requires input_images.",
+			},
+			"input_fidelity": map[string]any{
+				"type":        "string",
+				"description": "Optional reference-image fidelity hint for editing. It requires input_images.",
+				"enum":        []string{"low", "high"},
 			},
 			"filename": map[string]any{
 				"type":        "string",
@@ -177,19 +198,58 @@ func (t *ImageGenerateTool) Execute(ctx context.Context, args map[string]any) *T
 	if err != nil {
 		return ErrorResult(err.Error())
 	}
+	inputImageNames, err := imageGenerationStringSliceArg(args, "input_images")
+	if err != nil {
+		return ErrorResult(err.Error())
+	}
+	if len(inputImageNames) > maxImageGenerationInputImages {
+		return ErrorResult(fmt.Sprintf("input_images must contain at most %d images", maxImageGenerationInputImages))
+	}
+	inputImages, err := t.resolveInputImages(ctx, inputImageNames)
+	if err != nil {
+		return ErrorResult(err.Error())
+	}
+	maskName, err := imageGenerationStringArg(args, "mask")
+	if err != nil {
+		return ErrorResult(err.Error())
+	}
+	if maskName != "" && len(inputImages) == 0 {
+		return ErrorResult("mask requires input_images")
+	}
+	inputFidelity, err := imageGenerationEnumArg(args, "input_fidelity", "low", "high")
+	if err != nil {
+		return ErrorResult(err.Error())
+	}
+	if inputFidelity != "" && len(inputImages) == 0 {
+		return ErrorResult("input_fidelity requires input_images")
+	}
+	var mask *providers.ImageGenerationInput
+	if maskName != "" {
+		resolvedMask, resolveErr := t.resolveInputImage(ctx, maskName)
+		if resolveErr != nil {
+			return ErrorResult(fmt.Sprintf("invalid mask: %v", resolveErr))
+		}
+		if resolvedMask.ContentType != "image/png" {
+			return ErrorResult("invalid mask: mask must be a PNG image")
+		}
+		mask = &resolvedMask
+	}
 
 	modelNames := t.modelCandidates(modelOverride)
 	if len(modelNames) == 0 {
 		return ErrorResult("no image generation model configured")
 	}
 	request := providers.ImageGenerationRequest{
-		Prompt:       prompt,
-		Count:        int(countValue),
-		Size:         size,
-		Quality:      quality,
-		OutputFormat: outputFormat,
-		Background:   background,
-		MaxImageSize: t.maxImageSize,
+		Prompt:        prompt,
+		Count:         int(countValue),
+		Size:          size,
+		Quality:       quality,
+		OutputFormat:  outputFormat,
+		Background:    background,
+		InputFidelity: inputFidelity,
+		MaxImageSize:  t.maxImageSize,
+		InputImages:   inputImages,
+		Mask:          mask,
 	}
 
 	response, selectedModel, attempts, err := t.generateWithFallback(
@@ -206,10 +266,164 @@ func (t *ImageGenerateTool) Execute(ctx context.Context, args map[string]any) *T
 		return ErrorResult(fmt.Sprintf("failed to store generated image: %v", err)).WithError(err)
 	}
 
+	action := "Generated"
+	if len(inputImages) > 0 {
+		action = "Edited"
+	}
 	return MediaResult(
-		fmt.Sprintf("Generated %d image(s) with %s.", len(refs), selectedModel),
+		fmt.Sprintf("%s %d image(s) with %s.", action, len(refs), selectedModel),
 		refs,
 	).WithResponseHandled()
+}
+
+func imageGenerationStringSliceArg(args map[string]any, key string) ([]string, error) {
+	raw, exists := args[key]
+	if !exists || raw == nil {
+		return nil, nil
+	}
+	switch values := raw.(type) {
+	case []string:
+		result := make([]string, 0, len(values))
+		for _, value := range values {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				return nil, fmt.Errorf("%s entries must not be empty", key)
+			}
+			result = append(result, value)
+		}
+		return result, nil
+	case []any:
+		result := make([]string, 0, len(values))
+		for index, rawValue := range values {
+			value, ok := rawValue.(string)
+			if !ok || strings.TrimSpace(value) == "" {
+				return nil, fmt.Errorf("%s[%d] must be a non-empty string", key, index)
+			}
+			result = append(result, strings.TrimSpace(value))
+		}
+		return result, nil
+	default:
+		return nil, fmt.Errorf("%s must be an array of strings", key)
+	}
+}
+
+func (t *ImageGenerateTool) resolveInputImages(
+	ctx context.Context,
+	selectors []string,
+) ([]providers.ImageGenerationInput, error) {
+	if len(selectors) == 0 {
+		return nil, nil
+	}
+	result := make([]providers.ImageGenerationInput, 0, len(selectors))
+	seen := make(map[string]struct{}, len(selectors))
+	for index, selector := range selectors {
+		input, ref, err := t.resolveInputImageWithRef(ctx, selector)
+		if err != nil {
+			return nil, fmt.Errorf("input_images[%d]: %v", index, err)
+		}
+		if _, exists := seen[ref]; exists {
+			return nil, fmt.Errorf("input_images[%d] duplicates an earlier image", index)
+		}
+		seen[ref] = struct{}{}
+		result = append(result, input)
+	}
+	return result, nil
+}
+
+func (t *ImageGenerateTool) resolveInputImage(
+	ctx context.Context,
+	selector string,
+) (providers.ImageGenerationInput, error) {
+	input, _, err := t.resolveInputImageWithRef(ctx, selector)
+	return input, err
+}
+
+func (t *ImageGenerateTool) resolveInputImageWithRef(
+	ctx context.Context,
+	selector string,
+) (providers.ImageGenerationInput, string, error) {
+	selector = strings.TrimSpace(selector)
+	if selector == "" {
+		return providers.ImageGenerationInput{}, "", fmt.Errorf("image selector is empty")
+	}
+	refs := ToolMediaRefs(ctx)
+	if len(refs) == 0 {
+		return providers.ImageGenerationInput{}, "", fmt.Errorf(
+			"image %q is not available in the current turn; attach it or use load_image first",
+			selector,
+		)
+	}
+
+	for _, ref := range refs {
+		localPath, meta, err := t.mediaStore.ResolveWithMeta(ref)
+		if err != nil {
+			continue
+		}
+		matches := selector == ref
+		if !matches && !strings.HasPrefix(selector, "media://") {
+			matches = filepath.Clean(selector) == filepath.Clean(localPath)
+			if !matches && strings.HasPrefix(selector, "[image:") && strings.HasSuffix(selector, "]") {
+				path := strings.TrimSuffix(strings.TrimPrefix(selector, "[image:"), "]")
+				matches = filepath.Clean(path) == filepath.Clean(localPath)
+			}
+		}
+		if !matches {
+			continue
+		}
+		input, err := readImageGenerationInput(localPath, meta, t.maxImageSize)
+		if err != nil {
+			return providers.ImageGenerationInput{}, "", err
+		}
+		return input, ref, nil
+	}
+
+	return providers.ImageGenerationInput{}, "", fmt.Errorf(
+		"image %q is not one of the current turn's MediaStore images",
+		selector,
+	)
+}
+
+func readImageGenerationInput(
+	localPath string,
+	meta media.MediaMeta,
+	maxImageSize int,
+) (providers.ImageGenerationInput, error) {
+	info, err := os.Stat(localPath)
+	if err != nil {
+		return providers.ImageGenerationInput{}, fmt.Errorf("cannot stat image: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return providers.ImageGenerationInput{}, fmt.Errorf("image is not a regular file")
+	}
+	if info.Size() <= 0 {
+		return providers.ImageGenerationInput{}, fmt.Errorf("image is empty")
+	}
+	if info.Size() > int64(maxImageSize) {
+		return providers.ImageGenerationInput{}, fmt.Errorf("image exceeds %d bytes", maxImageSize)
+	}
+
+	kind, err := filetype.MatchFile(localPath)
+	if err != nil || kind == filetype.Unknown {
+		return providers.ImageGenerationInput{}, fmt.Errorf("image type is not recognized")
+	}
+	switch kind.MIME.Value {
+	case "image/png", "image/jpeg", "image/webp":
+	default:
+		return providers.ImageGenerationInput{}, fmt.Errorf("unsupported image type %q", kind.MIME.Value)
+	}
+	data, err := os.ReadFile(localPath)
+	if err != nil {
+		return providers.ImageGenerationInput{}, fmt.Errorf("read image: %w", err)
+	}
+	filename := filepath.Base(strings.TrimSpace(meta.Filename))
+	if filename == "" || filename == "." {
+		filename = filepath.Base(localPath)
+	}
+	return providers.ImageGenerationInput{
+		Data:        data,
+		ContentType: kind.MIME.Value,
+		Filename:    filename,
+	}, nil
 }
 
 func (t *ImageGenerateTool) modelCandidates(override string) []string {

@@ -60,13 +60,29 @@ type UsageInfo struct {
 // wire payload so strict OpenAI-compatible endpoints do not reject fields they
 // do not support.
 type ImageGenerationRequest struct {
-	Prompt       string
-	Count        int
-	Size         string
-	Quality      string
-	OutputFormat string
-	Background   string
-	MaxImageSize int
+	Prompt        string
+	Count         int
+	Size          string
+	Quality       string
+	OutputFormat  string
+	Background    string
+	InputFidelity string
+	MaxImageSize  int
+	// InputImages switches OpenAI-compatible providers to the /images/edits
+	// multipart endpoint. The bytes are loaded and validated by the tool.
+	InputImages []ImageGenerationInput
+	// Mask is an optional mask image used with InputImages. Providers may
+	// impose stricter format or dimension requirements.
+	Mask *ImageGenerationInput
+}
+
+// ImageGenerationInput is a validated source or mask image supplied to an
+// image generation request. It intentionally contains bytes rather than a
+// filesystem path so providers cannot access arbitrary local files.
+type ImageGenerationInput struct {
+	Data        []byte
+	ContentType string
+	Filename    string
 }
 
 // GeneratedImage is one decoded image returned by an image generation

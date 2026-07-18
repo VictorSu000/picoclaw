@@ -21,6 +21,7 @@ type (
 	ContentBlock            = protocoltypes.ContentBlock
 	CacheControl            = protocoltypes.CacheControl
 	Attachment              = protocoltypes.Attachment
+	ImageGenerationInput    = protocoltypes.ImageGenerationInput
 	ImageGenerationRequest  = protocoltypes.ImageGenerationRequest
 	GeneratedImage          = protocoltypes.GeneratedImage
 	ImageGenerationResponse = protocoltypes.ImageGenerationResponse

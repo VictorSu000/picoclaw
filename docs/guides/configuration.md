@@ -909,15 +909,22 @@ temporary `url` responses.
 
 The `image_generate` tool supports `prompt`, `count`, `size`, `quality`,
 `output_format`, `background`, `filename`, and an exact `model` alias override.
+`input_images` accepts MediaStore references or image paths exposed in the
+current turn; providing it switches to the OpenAI-compatible
+`/images/edits` endpoint. `mask` optionally selects a mask from the same
+current-turn MediaStore images; masks must be PNG images. `input_fidelity` can
+be set to `low` or `high` for reference-image editing. A Skill can call `load_image` first and then
+pass the resulting media reference to `image_generate`.
+
 Generated images are written to the media store and sent directly through the
 current channel. Provider-specific OpenAI-compatible fields, such as
 `response_format`, can be supplied through the image model entry's
 `extra_body`. Do not use the same entry as a chat model when its `extra_body`
 contains image-only fields.
 
-The first implementation is synchronous and supports text-to-image generation
-only. Image editing, streaming partial images, and persistent background tasks
-are not included yet.
+The second implementation is synchronous and supports text-to-image and
+reference-image editing. Streaming partial images and persistent background
+tasks are not included yet.
 
 #### Streaming Configuration
 

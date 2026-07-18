@@ -45,6 +45,7 @@ type toolCtxKey struct{ name string }
 var (
 	ctxKeyChannel          = &toolCtxKey{"channel"}
 	ctxKeyChatID           = &toolCtxKey{"chatID"}
+	ctxKeyMediaRefs        = &toolCtxKey{"mediaRefs"}
 	ctxKeyMessageID        = &toolCtxKey{"messageID"}
 	ctxKeyReplyToMessageID = &toolCtxKey{"replyToMessageID"}
 	ctxKeyAgentID          = &toolCtxKey{"agentID"}
@@ -63,6 +64,13 @@ func WithToolContext(ctx context.Context, channel, chatID string) context.Contex
 	ctx = context.WithValue(ctx, ctxKeyChannel, channel)
 	ctx = context.WithValue(ctx, ctxKeyChatID, chatID)
 	return ctx
+}
+
+// WithToolMediaRefs carries the MediaStore references available to the current
+// turn. Tools may use these references to select user attachments or media
+// produced by an earlier tool without accepting arbitrary filesystem paths.
+func WithToolMediaRefs(ctx context.Context, refs []string) context.Context {
+	return context.WithValue(ctx, ctxKeyMediaRefs, append([]string(nil), refs...))
 }
 
 // WithToolMessageContext returns a child context carrying inbound message IDs.
@@ -118,6 +126,16 @@ func ToolChatID(ctx context.Context) string {
 		return ""
 	}
 	return v
+}
+
+// ToolMediaRefs returns a copy of the MediaStore references available to the
+// current turn.
+func ToolMediaRefs(ctx context.Context) []string {
+	refs, ok := ctx.Value(ctxKeyMediaRefs).([]string)
+	if !ok {
+		return nil
+	}
+	return append([]string(nil), refs...)
 }
 
 // ToolMessageID extracts the current inbound message ID from ctx, or "" if unset.

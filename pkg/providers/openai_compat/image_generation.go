@@ -7,8 +7,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -34,9 +38,10 @@ type imageGenerationWireResponse struct {
 	Usage map[string]any `json:"usage"`
 }
 
-// GenerateImage calls an OpenAI-compatible /images/generations endpoint.
-// The method accepts both inline base64 and temporary URL responses and always
-// returns decoded, size-bounded image bytes to the caller.
+// GenerateImage calls an OpenAI-compatible image endpoint. Requests without
+// source images use /images/generations; source images switch the request to
+// multipart /images/edits. Responses may contain inline base64 or temporary
+// URLs and are always returned as decoded, size-bounded image bytes.
 func (p *Provider) GenerateImage(
 	ctx context.Context,
 	model string,
@@ -64,46 +69,74 @@ func (p *Provider) GenerateImage(
 	if maxImageSize <= 0 {
 		maxImageSize = defaultMaxGeneratedImageSize
 	}
+	if len(request.InputImages) > 4 {
+		return nil, fmt.Errorf("image editing accepts at most 4 input images")
+	}
+	if request.Mask != nil && len(request.InputImages) == 0 {
+		return nil, fmt.Errorf("image editing mask requires at least one input image")
+	}
+	for index, input := range request.InputImages {
+		if err := validateImageGenerationInput(input, maxImageSize); err != nil {
+			return nil, fmt.Errorf("validate input image %d: %w", index+1, err)
+		}
+	}
+	if request.Mask != nil {
+		if err := validateImageGenerationInput(*request.Mask, maxImageSize); err != nil {
+			return nil, fmt.Errorf("validate image mask: %w", err)
+		}
+		contentType, _, _ := detectGeneratedImageType(request.Mask.Data)
+		if contentType != "image/png" {
+			return nil, fmt.Errorf("image mask must be a PNG image")
+		}
+	}
 
-	body := map[string]any{
+	fields := map[string]any{
 		"model":  normalizeModel(strings.TrimSpace(model), p.apiBase),
 		"prompt": request.Prompt,
 		"n":      count,
 	}
 	if request.Size != "" {
-		body["size"] = request.Size
+		fields["size"] = request.Size
 	}
 	if request.Quality != "" {
-		body["quality"] = request.Quality
+		fields["quality"] = request.Quality
 	}
 	if request.OutputFormat != "" {
-		body["output_format"] = request.OutputFormat
+		fields["output_format"] = request.OutputFormat
 	}
 	if request.Background != "" {
-		body["background"] = request.Background
+		fields["background"] = request.Background
+	}
+	if request.InputFidelity != "" && len(request.InputImages) > 0 {
+		fields["input_fidelity"] = request.InputFidelity
 	}
 	// Dedicated image model entries may use extra_body for compatible
 	// provider-specific options such as response_format. The endpoint model,
-	// prompt, and requested image count cannot be overridden.
+	// prompt, requested image count, and multipart file fields cannot be
+	// overridden.
 	for key, value := range p.extraBody {
 		switch key {
-		case "model", "prompt", "n":
+		case "model", "prompt", "n", "image", "image[]", "mask":
 			continue
 		default:
-			body[key] = value
+			fields[key] = value
 		}
 	}
 
-	jsonData, err := json.Marshal(body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal image generation request: %w", err)
-	}
+	operation := "generation"
 	endpoint := strings.TrimRight(p.apiBase, "/") + "/images/generations"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(jsonData))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create image generation request: %w", err)
+	var req *http.Request
+	var err error
+	if len(request.InputImages) > 0 {
+		operation = "edit"
+		endpoint = strings.TrimRight(p.apiBase, "/") + "/images/edits"
+		req, err = newImageEditHTTPRequest(ctx, endpoint, fields, request.InputImages, request.Mask)
+	} else {
+		req, err = newImageGenerationHTTPRequest(ctx, endpoint, fields)
 	}
-	req.Header.Set("Content-Type", "application/json")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create image %s request: %w", operation, err)
+	}
 	req.Header.Set("Accept", "application/json")
 	if p.userAgent != "" {
 		req.Header.Set("User-Agent", p.userAgent)
@@ -111,11 +144,15 @@ func (p *Provider) GenerateImage(
 	if p.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+p.apiKey)
 	}
+	contentType := req.Header.Get("Content-Type")
 	p.applyCustomHeaders(req)
+	// Multipart boundaries are generated per request and must not be replaced
+	// by a configured static Content-Type header.
+	req.Header.Set("Content-Type", contentType)
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to send image generation request: %w", err)
+		return nil, fmt.Errorf("failed to send image %s request: %w", operation, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -125,22 +162,176 @@ func (p *Provider) GenerateImage(
 	responseLimit := imageJSONResponseLimit(maxImageSize, count)
 	raw, err := readLimitedBytes(resp.Body, responseLimit)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read image generation response: %w", err)
+		return nil, fmt.Errorf("failed to read image %s response: %w", operation, err)
 	}
 	if common.LooksLikeHTML(raw, resp.Header.Get("Content-Type")) {
 		return nil, common.WrapHTMLResponseError(resp.StatusCode, raw, resp.Header.Get("Content-Type"), p.apiBase)
 	}
 
+	return p.parseImageGenerationResponse(ctx, raw, operation, count, maxImageSize)
+}
+
+func newImageGenerationHTTPRequest(
+	ctx context.Context,
+	endpoint string,
+	fields map[string]any,
+) (*http.Request, error) {
+	jsonData, err := json.Marshal(fields)
+	if err != nil {
+		return nil, fmt.Errorf("marshal JSON body: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(jsonData))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return req, nil
+}
+
+func newImageEditHTTPRequest(
+	ctx context.Context,
+	endpoint string,
+	fields map[string]any,
+	inputImages []protocoltypes.ImageGenerationInput,
+	mask *protocoltypes.ImageGenerationInput,
+) (*http.Request, error) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	for key, value := range fields {
+		encoded, err := encodeImageEditField(value)
+		if err != nil {
+			return nil, fmt.Errorf("encode multipart field %q: %w", key, err)
+		}
+		if err := writer.WriteField(key, encoded); err != nil {
+			return nil, fmt.Errorf("write multipart field %q: %w", key, err)
+		}
+	}
+	imageField := "image"
+	if len(inputImages) > 1 {
+		imageField = "image[]"
+	}
+	for index, input := range inputImages {
+		if err := writeImageEditFile(writer, imageField, input, fmt.Sprintf("input-image-%d", index+1)); err != nil {
+			return nil, err
+		}
+	}
+	if mask != nil {
+		if err := writeImageEditFile(writer, "mask", *mask, "mask"); err != nil {
+			return nil, err
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("finalize multipart body: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, &body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	return req, nil
+}
+
+func encodeImageEditField(value any) (string, error) {
+	switch typed := value.(type) {
+	case nil:
+		return "", nil
+	case string:
+		return typed, nil
+	case []byte:
+		return string(typed), nil
+	case fmt.Stringer:
+		return typed.String(), nil
+	case bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64,
+		float32, float64:
+		return fmt.Sprint(typed), nil
+	default:
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return "", err
+		}
+		return string(encoded), nil
+	}
+}
+
+func writeImageEditFile(
+	writer *multipart.Writer,
+	field string,
+	input protocoltypes.ImageGenerationInput,
+	fallbackBase string,
+) error {
+	contentType, extension, err := detectGeneratedImageType(input.Data)
+	if err != nil {
+		return fmt.Errorf("validate multipart file %q: %w", field, err)
+	}
+	filename := filepath.Base(strings.TrimSpace(input.Filename))
+	if filename == "" || filename == "." {
+		filename = fallbackBase + "." + extension
+	} else if !imageFilenameMatchesType(filename, contentType) {
+		base := strings.TrimSuffix(filename, filepath.Ext(filename))
+		if base == "" || base == "." {
+			base = fallbackBase
+		}
+		filename = base + "." + extension
+	}
+	header := make(textproto.MIMEHeader)
+	header.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{
+		"name":     field,
+		"filename": filename,
+	}))
+	header.Set("Content-Type", contentType)
+	part, err := writer.CreatePart(header)
+	if err != nil {
+		return fmt.Errorf("create multipart file %q: %w", field, err)
+	}
+	if _, err := part.Write(input.Data); err != nil {
+		return fmt.Errorf("write multipart file %q: %w", field, err)
+	}
+	return nil
+}
+
+func imageFilenameMatchesType(filename, contentType string) bool {
+	extension := strings.ToLower(filepath.Ext(filename))
+	switch contentType {
+	case "image/png":
+		return extension == ".png"
+	case "image/jpeg":
+		return extension == ".jpg" || extension == ".jpeg"
+	case "image/webp":
+		return extension == ".webp"
+	default:
+		return false
+	}
+}
+
+func validateImageGenerationInput(input protocoltypes.ImageGenerationInput, maxImageSize int) error {
+	if len(input.Data) == 0 {
+		return fmt.Errorf("image is empty")
+	}
+	if len(input.Data) > maxImageSize {
+		return fmt.Errorf("image exceeds %d bytes", maxImageSize)
+	}
+	_, _, err := detectGeneratedImageType(input.Data)
+	return err
+}
+
+func (p *Provider) parseImageGenerationResponse(
+	ctx context.Context,
+	raw []byte,
+	operation string,
+	count int,
+	maxImageSize int,
+) (*protocoltypes.ImageGenerationResponse, error) {
 	var payload imageGenerationWireResponse
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil, fmt.Errorf("failed to parse image generation response: %w", err)
+		return nil, fmt.Errorf("failed to parse image %s response: %w", operation, err)
 	}
 	if len(payload.Data) == 0 {
-		return nil, fmt.Errorf("image generation response contained no images")
+		return nil, fmt.Errorf("image %s response contained no images", operation)
 	}
 	if len(payload.Data) > count {
 		return nil, fmt.Errorf(
-			"image generation response contained %d images, requested at most %d",
+			"image %s response contained %d images, requested at most %d",
+			operation,
 			len(payload.Data),
 			count,
 		)
@@ -149,6 +340,7 @@ func (p *Provider) GenerateImage(
 	images := make([]protocoltypes.GeneratedImage, 0, len(payload.Data))
 	for index, item := range payload.Data {
 		var data []byte
+		var err error
 		switch {
 		case strings.TrimSpace(item.B64JSON) != "":
 			data, err = decodeImageBase64(item.B64JSON, maxImageSize)

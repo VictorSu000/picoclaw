@@ -567,6 +567,7 @@ toolLoop:
 			ts.sessionKey,
 			ts.opts.Dispatch.SessionScope,
 		)
+		execCtx = tools.WithToolMediaRefs(execCtx, exec.availableMedia)
 		execCtx = tools.WithAllowedMCPServers(
 			execCtx,
 			ts.preset.MCP,
@@ -619,6 +620,7 @@ toolLoop:
 		if toolResult == nil {
 			toolResult = tools.ErrorResult("hook returned nil tool result")
 		}
+		exec.addAvailableMedia(toolResult.Media...)
 
 		if len(toolResult.Media) > 0 && toolResult.ResponseHandled {
 			parts := make([]bus.MediaPart, 0, len(toolResult.Media))

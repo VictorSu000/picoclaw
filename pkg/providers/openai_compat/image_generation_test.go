@@ -3,6 +3,7 @@ package openai_compat
 import (
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -87,6 +88,75 @@ func TestProviderGenerateImageDownloadsSameHostURLResponse(t *testing.T) {
 	provider := NewProvider("test-key", server.URL, "")
 	response, err := provider.GenerateImage(t.Context(), "gpt-image-test", protocoltypes.ImageGenerationRequest{
 		Prompt:       "draw a pico board",
+		MaxImageSize: 1024 * 1024,
+	})
+	if err != nil {
+		t.Fatalf("GenerateImage() error = %v", err)
+	}
+	if len(response.Images) != 1 || response.Images[0].ContentType != "image/png" {
+		t.Fatalf("images = %#v, want one PNG", response.Images)
+	}
+}
+
+func TestProviderGenerateImageUsesEditsForInputImages(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/images/edits" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		if err := r.ParseMultipartForm(4 * 1024 * 1024); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if got := r.FormValue("model"); got != "gpt-image-edit-test" {
+			http.Error(w, "wrong model", http.StatusBadRequest)
+			return
+		}
+		if got := r.FormValue("prompt"); got != "remove the background" {
+			http.Error(w, "wrong prompt", http.StatusBadRequest)
+			return
+		}
+		if got := r.FormValue("n"); got != "1" {
+			http.Error(w, "wrong count", http.StatusBadRequest)
+			return
+		}
+		if len(r.MultipartForm.File["image[]"]) != 2 {
+			http.Error(w, "wrong input image count", http.StatusBadRequest)
+			return
+		}
+		if len(r.MultipartForm.File["mask"]) != 1 {
+			http.Error(w, "missing mask", http.StatusBadRequest)
+			return
+		}
+		file, err := r.MultipartForm.File["image[]"][0].Open()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+		data, err := io.ReadAll(file)
+		if err != nil || len(data) == 0 {
+			http.Error(w, "empty input image", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{{
+				"b64_json": base64.StdEncoding.EncodeToString(testGeneratedPNG),
+			}},
+		})
+	}))
+	defer server.Close()
+
+	provider := NewProvider("test-key", server.URL, "")
+	response, err := provider.GenerateImage(t.Context(), "gpt-image-edit-test", protocoltypes.ImageGenerationRequest{
+		Prompt: "remove the background",
+		Count:  1,
+		InputImages: []protocoltypes.ImageGenerationInput{
+			{Data: testGeneratedPNG, ContentType: "image/png", Filename: "reference.png"},
+			{Data: testGeneratedPNG, ContentType: "image/png", Filename: "style.png"},
+		},
+		Mask:         &protocoltypes.ImageGenerationInput{Data: testGeneratedPNG, ContentType: "image/png", Filename: "mask.png"},
 		MaxImageSize: 1024 * 1024,
 	})
 	if err != nil {

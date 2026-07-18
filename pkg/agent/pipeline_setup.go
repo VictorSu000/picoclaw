@@ -169,6 +169,7 @@ func (p *Pipeline) SetupTurn(ctx context.Context, ts *turnState) (*turnExecution
 		messages,
 	)
 	exec.currentTurnStart = currentTurnStart
+	exec.addAvailableMedia(ts.media...)
 	exec.activeCandidates = activeCandidates
 	exec.activeModel = activeModel
 	exec.activeModelConfig = resolveActiveModelConfig(

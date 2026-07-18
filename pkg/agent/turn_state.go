@@ -119,6 +119,7 @@ type turnExecution struct {
 	history          []providers.Message // from ContextManager.Assemble
 	summary          string
 	currentTurnStart int
+	availableMedia   []string // MediaStore refs available to tools in this turn
 
 	// Turn output
 	finalContent string
@@ -154,6 +155,27 @@ type turnExecution struct {
 	// Abort signaling for coordinator (set by Pipeline methods)
 	abortedByHardAbort bool // true when hard abort triggered during LLM/tools
 	abortedByHook      bool // true when HookActionAbortTurn triggered
+}
+
+func (e *turnExecution) addAvailableMedia(refs ...string) {
+	if e == nil || len(refs) == 0 {
+		return
+	}
+	seen := make(map[string]struct{}, len(e.availableMedia)+len(refs))
+	for _, ref := range e.availableMedia {
+		seen[ref] = struct{}{}
+	}
+	for _, ref := range refs {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			continue
+		}
+		if _, exists := seen[ref]; exists {
+			continue
+		}
+		seen[ref] = struct{}{}
+		e.availableMedia = append(e.availableMedia, ref)
+	}
 }
 
 // newTurnExecution creates a turnExecution initialized from turnState and options.

@@ -42,6 +42,10 @@ func WithToolContext(ctx context.Context, channel, chatID string) context.Contex
 	return toolshared.WithToolContext(ctx, channel, chatID)
 }
 
+func WithToolMediaRefs(ctx context.Context, refs []string) context.Context {
+	return toolshared.WithToolMediaRefs(ctx, refs)
+}
+
 func WithToolMessageContext(ctx context.Context, messageID, replyToMessageID string) context.Context {
 	return toolshared.WithToolMessageContext(ctx, messageID, replyToMessageID)
 }
@@ -71,6 +75,10 @@ func ToolChannel(ctx context.Context) string {
 
 func ToolChatID(ctx context.Context) string {
 	return toolshared.ToolChatID(ctx)
+}
+
+func ToolMediaRefs(ctx context.Context) []string {
+	return toolshared.ToolMediaRefs(ctx)
 }
 
 func ToolMessageID(ctx context.Context) string {

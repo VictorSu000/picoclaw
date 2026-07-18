@@ -700,12 +700,17 @@ Agent 读取 HEARTBEAT.md
 
 `image_generate` 工具支持 `prompt`、`count`、`size`、`quality`、
 `output_format`、`background`、`filename`，以及精确的 `model` 别名覆盖。
+`input_images` 接受当前 turn 中暴露的 MediaStore 引用或图片路径；提供该参数后会
+切换到 OpenAI 兼容的 `/images/edits` 接口。`mask` 可以从同一组当前 turn 图片中
+选择蒙版，蒙版必须是 PNG 图片。Skill 可以先调用 `load_image`，再把返回的媒体引用传给
+`image_generate`。参考图编辑还可以将 `input_fidelity` 设为 `low` 或 `high`。
+
 生成图片会写入 MediaStore，并通过当前聊天渠道直接发送。特定兼容端点需要的
 `response_format` 等字段可写入图像模型的 `extra_body`。如果
 `extra_body` 含有图像专用字段，不要把同一模型条目同时用作聊天模型。
 
-第一版采用同步执行且仅支持文生图；图片编辑、局部图片流式返回和持久化后台任务
-暂未包含。
+第二版采用同步执行，支持文生图、参考图生成和图片编辑；局部图片流式返回和持久化
+后台任务暂未包含。
 
 #### 流式输出配置
 

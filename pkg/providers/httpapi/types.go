@@ -19,6 +19,7 @@ type (
 	GoogleExtra             = protocoltypes.GoogleExtra
 	ContentBlock            = protocoltypes.ContentBlock
 	CacheControl            = protocoltypes.CacheControl
+	ImageGenerationInput    = protocoltypes.ImageGenerationInput
 	ImageGenerationRequest  = protocoltypes.ImageGenerationRequest
 	ImageGenerationResponse = protocoltypes.ImageGenerationResponse
 )
