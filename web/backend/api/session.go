@@ -41,6 +41,7 @@ func (h *Handler) registerSessionRoutes(mux *http.ServeMux) {
 // sessionFile mirrors the on-disk session JSON structure from pkg/session.
 type sessionFile struct {
 	Key                 string              `json:"key"`
+	Title               string              `json:"title,omitempty"`
 	AgentPreset         string              `json:"agent_preset,omitempty"`
 	AgentPresetOverride bool                `json:"agent_preset_override,omitempty"`
 	Messages            []providers.Message `json:"messages"`
@@ -262,6 +263,7 @@ func (h *Handler) readJSONLSession(dir, sessionKey string) (sessionFile, error) 
 
 	return sessionFile{
 		Key:                 meta.Key,
+		Title:               meta.Title,
 		AgentPreset:         meta.AgentPreset,
 		AgentPresetOverride: meta.AgentPresetOverride || strings.TrimSpace(meta.AgentPreset) != "",
 		Messages:            messages,
@@ -500,9 +502,12 @@ func buildSessionListItem(sessionID string, sess sessionFile, meta memory.Sessio
 		preview = "(empty)"
 	}
 
-	title := preview
-	if strings.TrimSpace(meta.Title) != "" {
-		title = meta.Title
+	title := strings.TrimSpace(meta.Title)
+	if title == "" {
+		title = strings.TrimSpace(sess.Title)
+	}
+	if title == "" {
+		title = preview
 	}
 
 	return sessionListItem{
@@ -1204,24 +1209,14 @@ func (h *Handler) handleRenameSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	base := filepath.Join(dir, sanitizeSessionKey(ref.Key))
-	metaPath := base + ".meta.json"
-
-	meta, err := h.readSessionMeta(metaPath, ref.Key)
+	store, err := memory.NewJSONLStore(dir)
 	if err != nil {
-		meta = memory.SessionMeta{Key: ref.Key}
-	}
-
-	meta.Title = req.Title
-
-	data, err := json.MarshalIndent(meta, "", "  ")
-	if err != nil {
-		http.Error(w, "failed to encode session meta", http.StatusInternalServerError)
+		http.Error(w, "failed to open session store", http.StatusInternalServerError)
 		return
 	}
-
-	if err := os.WriteFile(metaPath, data, 0o644); err != nil {
-		http.Error(w, "failed to write session meta", http.StatusInternalServerError)
+	defer store.Close()
+	if _, err := store.SetSessionTitle(r.Context(), ref.Key, req.Title, true); err != nil {
+		http.Error(w, "failed to update session title", http.StatusInternalServerError)
 		return
 	}
 

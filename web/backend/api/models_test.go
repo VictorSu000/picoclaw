@@ -37,6 +37,44 @@ func resetModelProbeHooks(t *testing.T) {
 	})
 }
 
+func TestHandleSetFastModel(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	cfg.ModelList = []*config.ModelConfig{{
+		ModelName: "fast-chat",
+		Provider:  "openai",
+		Model:     "gpt-4o-mini",
+		APIKeys:   config.SimpleSecureStrings("test-key"),
+	}}
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/models/fast", bytes.NewBufferString(`{"model_name":"fast-chat"}`))
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	updated, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() after update error = %v", err)
+	}
+	if updated.Agents.Defaults.FastModel != "fast-chat" {
+		t.Fatalf("FastModel = %q, want %q", updated.Agents.Defaults.FastModel, "fast-chat")
+	}
+}
+
 func addModelAndLoadLatest(t *testing.T, configPath string, body string) *config.ModelConfig {
 	t.Helper()
 

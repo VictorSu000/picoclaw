@@ -31,6 +31,7 @@ export interface ModelInfo {
   available: boolean
   status: "available" | "unconfigured" | "unreachable"
   is_default: boolean
+  is_fast_model: boolean
   is_virtual: boolean
   is_vision_fallback: boolean
   is_image_generation: boolean
@@ -59,6 +60,7 @@ interface ModelsListResponse {
   models: ModelInfo[]
   total: number
   default_model: string
+  fast_model: string
   vision_fallback_model: string
   image_generation_model: string
   provider_options: ModelProviderOption[]
@@ -68,6 +70,7 @@ interface ModelActionResponse {
   status: string
   index?: number
   default_model?: string
+  fast_model?: string
   vision_fallback_model?: string
   image_generation_model?: string
 }
@@ -123,6 +126,19 @@ export async function setDefaultModel(
   modelName: string,
 ): Promise<ModelActionResponse> {
   const response = await request<ModelActionResponse>("/api/models/default", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model_name: modelName }),
+  })
+
+  await refreshGatewayState()
+  return response
+}
+
+export async function setFastModel(
+  modelName: string,
+): Promise<ModelActionResponse> {
+  const response = await request<ModelActionResponse>("/api/models/fast", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model_name: modelName }),

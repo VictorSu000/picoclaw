@@ -93,6 +93,11 @@ export function ModelCard({
               {t("models.badge.default")}
             </span>
           )}
+          {model.is_fast_model && (
+            <span className="shrink-0 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] leading-none font-medium text-amber-600 dark:text-amber-400">
+              {t("models.badge.fastModel")}
+            </span>
+          )}
           {model.is_virtual && (
             <span className="bg-muted text-muted-foreground shrink-0 rounded px-1.5 py-0.5 text-[10px] leading-none font-medium">
               {t("models.badge.virtual")}

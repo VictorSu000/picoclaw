@@ -45,6 +45,11 @@ type AgentInstance struct {
 	Candidates                []providers.FallbackCandidate
 	ImageCandidates           []providers.FallbackCandidate
 	VisionFallbackCandidates  []providers.FallbackCandidate
+	// FastModel and FastProvider are used for short background tasks that must
+	// not affect the model selected for the conversation turn itself.
+	FastModel    string
+	FastModelID  string
+	FastProvider providers.LLMProvider
 
 	// Router is non-nil when model routing is configured and the light model
 	// was successfully resolved. It scores each incoming message and decides
@@ -290,6 +295,25 @@ func NewAgentInstance(
 		}
 	}
 
+	fastModel := strings.TrimSpace(defaults.FastModel)
+	var fastModelID string
+	var fastProvider providers.LLMProvider
+	if fastModel != "" {
+		fastModelCfg, err := resolvedModelConfig(cfg, fastModel, workspace)
+		if err != nil {
+			logger.WarnCF("agent", "Fast model config invalid; background tasks disabled",
+				map[string]any{"fast_model": fastModel, "agent_id": agentID, "error": err.Error()})
+		} else {
+			fastProvider, fastModelID, err = providers.CreateProviderFromConfig(fastModelCfg)
+			if err != nil {
+				logger.WarnCF("agent", "Fast model provider init failed; background tasks disabled",
+					map[string]any{"fast_model": fastModel, "agent_id": agentID, "error": err.Error()})
+				fastProvider = nil
+				fastModelID = ""
+			}
+		}
+	}
+
 	return &AgentInstance{
 		ID:                        agentID,
 		Name:                      agentName,
@@ -315,6 +339,9 @@ func NewAgentInstance(
 		Candidates:                candidates,
 		ImageCandidates:           imageCandidates,
 		VisionFallbackCandidates:  visionFallbackCandidates,
+		FastModel:                 fastModel,
+		FastModelID:               fastModelID,
+		FastProvider:              fastProvider,
 		Router:                    router,
 		LightCandidates:           lightCandidates,
 		LightProvider:             lightProvider,
@@ -497,8 +524,11 @@ func mediaTempDirPattern() string {
 	return "^" + regexp.QuoteMeta(filepath.Clean(media.TempDir())) + "(?:" + sep + "|$)"
 }
 
-// Close releases resources held by the agent's session store.
+// Close releases resources held by the agent.
 func (a *AgentInstance) Close() error {
+	if a.FastProvider != nil {
+		closeProviderIfStateful(a.FastProvider)
+	}
 	if a.Sessions != nil {
 		return a.Sessions.Close()
 	}

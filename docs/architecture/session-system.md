@@ -171,6 +171,7 @@ The files store:
 `SessionMeta` currently includes:
 
 - `Key`
+- `Title`
 - `Summary`
 - `Skip`
 - `Count`
@@ -178,6 +179,7 @@ The files store:
 - `UpdatedAt`
 - `Scope`
 - `Aliases`
+- `Favorited`
 
 ## Write And Crash Semantics
 

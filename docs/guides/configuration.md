@@ -852,6 +852,28 @@ Resolution rules:
 - If `provider` is omitted, PicoClaw treats the first `/` segment in `model` as the provider and everything after that first `/` as the runtime model ID.
 - This means `"model": "openrouter/openai/gpt-5.4"` still works as a compatibility form and sends `openai/gpt-5.4` to OpenRouter.
 
+#### Fast Background Model
+
+`agents.defaults.fast_model` selects a model for short background tasks. The first
+consumer is automatic WebUI session-title generation after the first completed
+Pico session turn. It must reference a text-capable entry in `model_list`:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "model_name": "gpt-5.4",
+      "fast_model": "gpt-5.4-mini"
+    }
+  }
+}
+```
+
+Leave `fast_model` empty to disable automatic titles. It is independent from
+`agents.defaults.routing.light_model`, which controls model selection for normal
+user turns. Fast-model failures are logged and do not change the user-visible
+chat response.
+
 #### Vision Input Routing
 
 Add the `vision` tag to models that accept image input. `agents.defaults.vision_fallback_model` is the conditional fallback: media turns keep using the active primary model when it has the `vision` tag, and switch to `vision_fallback_model` only when the primary lacks that tag.

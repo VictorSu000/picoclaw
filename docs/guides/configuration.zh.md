@@ -644,6 +644,27 @@ Agent 读取 HEARTBEAT.md
 - 如果未设置 `provider`，PicoClaw 会把 `model` 第一个 `/` 之前的字段当作 provider，并把第一个 `/` 之后的全部内容当作最终模型 ID。
 - 这意味着 `"model": "openrouter/openai/gpt-5.4"` 这样的兼容写法仍然可用，并会把 `openai/gpt-5.4` 发送给 OpenRouter。
 
+#### 快速后台模型
+
+`agents.defaults.fast_model` 用于选择短小的后台任务模型。目前第一个用途是：
+Pico/WebUI session 首轮对话完成后，异步生成一个简短的 session 标题。该字段应引用
+`model_list` 中支持文本对话的模型：
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "model_name": "gpt-5.4",
+      "fast_model": "gpt-5.4-mini"
+    }
+  }
+}
+```
+
+将 `fast_model` 留空即可关闭自动标题。它与
+`agents.defaults.routing.light_model` 相互独立，后者控制普通用户请求的模型路由。
+快速模型调用失败时只记录日志，不会影响用户看到的正常回复。
+
 #### 视觉输入路由
 
 为支持图片输入的模型添加 `vision` 标签。`agents.defaults.vision_fallback_model` 表示条件备用视觉模型：包含图片的消息在当前主模型带有 `vision` 标签时继续使用主模型，只有主模型不带该标签时才切换到 `vision_fallback_model`。

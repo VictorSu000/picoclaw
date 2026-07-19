@@ -87,6 +87,43 @@ func TestAddMessage_AutoCreatesSession(t *testing.T) {
 	}
 }
 
+func TestSetSessionTitle_ConditionalAndOverwrite(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	updated, err := store.SetSessionTitle(ctx, "title-session", "Generated title", false)
+	if err != nil {
+		t.Fatalf("SetSessionTitle() error = %v", err)
+	}
+	if !updated {
+		t.Fatal("first conditional title update = false, want true")
+	}
+
+	updated, err = store.SetSessionTitle(ctx, "title-session", "Should not replace", false)
+	if err != nil {
+		t.Fatalf("second conditional title update error = %v", err)
+	}
+	if updated {
+		t.Fatal("second conditional title update = true, want false")
+	}
+
+	updated, err = store.SetSessionTitle(ctx, "title-session", "Manual title", true)
+	if err != nil {
+		t.Fatalf("overwrite title update error = %v", err)
+	}
+	if !updated {
+		t.Fatal("overwrite title update = false, want true")
+	}
+
+	meta, err := store.GetSessionMeta(ctx, "title-session")
+	if err != nil {
+		t.Fatalf("GetSessionMeta() error = %v", err)
+	}
+	if meta.Title != "Manual title" {
+		t.Fatalf("meta.Title = %q, want %q", meta.Title, "Manual title")
+	}
+}
+
 func TestAddFullMessage_WithToolCalls(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

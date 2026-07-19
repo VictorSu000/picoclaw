@@ -13,8 +13,10 @@ import (
 
 // Compile-time interface satisfaction checks.
 var (
-	_ session.SessionStore = (*session.SessionManager)(nil)
-	_ session.SessionStore = (*session.JSONLBackend)(nil)
+	_ session.SessionStore      = (*session.SessionManager)(nil)
+	_ session.SessionStore      = (*session.JSONLBackend)(nil)
+	_ session.TitleSessionStore = (*session.SessionManager)(nil)
+	_ session.TitleSessionStore = (*session.JSONLBackend)(nil)
 )
 
 func newBackend(t *testing.T) *session.JSONLBackend {
@@ -95,6 +97,23 @@ func TestJSONLBackend_Summary(t *testing.T) {
 	b.SetSummary("s1", "test summary")
 	if got := b.GetSummary("s1"); got != "test summary" {
 		t.Errorf("got %q, want %q", got, "test summary")
+	}
+}
+
+func TestJSONLBackend_TitleDoesNotOverwriteExistingTitle(t *testing.T) {
+	b := newBackend(t)
+
+	if updated, err := b.SetTitleIfEmpty("s1", "Generated title"); err != nil || !updated {
+		t.Fatalf("first SetTitleIfEmpty() = (%v, %v), want (true, nil)", updated, err)
+	}
+	if updated, err := b.SetTitleIfEmpty("s1", "Other title"); err != nil || updated {
+		t.Fatalf("second SetTitleIfEmpty() = (%v, %v), want (false, nil)", updated, err)
+	}
+	if err := b.SetTitle("s1", "Manual title"); err != nil {
+		t.Fatalf("SetTitle() error = %v", err)
+	}
+	if updated, err := b.SetTitleIfEmpty("s1", "Generated after manual"); err != nil || updated {
+		t.Fatalf("SetTitleIfEmpty() after manual rename = (%v, %v), want (false, nil)", updated, err)
 	}
 }
 

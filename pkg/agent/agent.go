@@ -47,20 +47,21 @@ type AgentLoop struct {
 	hooks              *HookManager
 
 	// Runtime state
-	running        atomic.Bool
-	contextManager ContextManager
-	fallback       *providers.FallbackChain
-	channelManager interfaces.ChannelManager
-	mediaStore     media.MediaStore
-	transcriber    asr.Transcriber
-	cmdRegistry    *commands.Registry
-	mcp            mcpRuntime
-	evolution      *evolutionBridge
-	hookRuntime    hookRuntime
-	steering       *steeringQueue
-	pendingSkills  sync.Map
-	pendingStops   sync.Map
-	mu             sync.RWMutex
+	running          atomic.Bool
+	contextManager   ContextManager
+	fallback         *providers.FallbackChain
+	channelManager   interfaces.ChannelManager
+	mediaStore       media.MediaStore
+	transcriber      asr.Transcriber
+	cmdRegistry      *commands.Registry
+	mcp              mcpRuntime
+	evolution        *evolutionBridge
+	hookRuntime      hookRuntime
+	steering         *steeringQueue
+	pendingSkills    sync.Map
+	pendingStops     sync.Map
+	sessionTitleJobs sync.Map
+	mu               sync.RWMutex
 
 	// workerSem limits concurrent turn processing workers.
 	workerSem chan struct{}
@@ -579,6 +580,7 @@ func (al *AgentLoop) runAgentLoop(
 		opts.Dispatch.SessionScope,
 		opts.Dispatch.SessionAliases,
 	)
+	titleEligible := shouldGenerateFirstSessionTitle(agent, opts)
 
 	turnScope := al.newTurnEventScope(
 		agent.ID,
@@ -632,6 +634,10 @@ func (al *AgentLoop) runAgentLoop(
 		}
 		markFinalOutbound(&msg)
 		al.bus.PublishOutbound(ctx, msg)
+	}
+
+	if titleEligible && result.status == TurnEndStatusCompleted {
+		al.scheduleSessionTitle(agent, opts, result.finalContent)
 	}
 
 	if result.finalContent != "" {

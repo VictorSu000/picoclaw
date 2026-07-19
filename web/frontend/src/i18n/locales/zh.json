@@ -279,6 +279,13 @@
     "providerCatalogUnavailable": "后端 Provider catalog 暂不可用，待模型 API 成功加载后才能选择新的 Provider。",
     "noDefaultHintPrefix": "尚未设置默认模型，点击",
     "noDefaultHintSuffix": "设为默认。",
+    "fastModel": {
+      "label": "快速模型",
+      "description": "用于短小的后台任务，例如在会话首轮完成后生成标题。",
+      "none": "未配置",
+      "noOptions": "请先添加一个可用的对话模型，再在此选择。",
+      "saveSuccess": "快速模型已更新。"
+    },
     "visionFallback": {
       "label": "备用视觉模型",
       "description": "仅当未配置 image_model，且当前主模型没有 vision 标签时使用。",
@@ -300,6 +307,7 @@
     },
     "badge": {
       "default": "默认",
+      "fastModel": "快速模型",
       "virtual": "虚拟",
       "visionFallback": "视觉备用",
       "imageGeneration": "图像生成"

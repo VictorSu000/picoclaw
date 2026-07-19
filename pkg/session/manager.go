@@ -14,6 +14,7 @@ import (
 
 type Session struct {
 	Key                 string              `json:"key"`
+	Title               string              `json:"title,omitempty"`
 	AgentPreset         string              `json:"agent_preset,omitempty"`
 	AgentPresetOverride bool                `json:"agent_preset_override,omitempty"`
 	Messages            []providers.Message `json:"messages"`
@@ -136,6 +137,44 @@ func (sm *SessionManager) GetSummary(key string) string {
 	return session.Summary
 }
 
+func (sm *SessionManager) SetTitle(key, title string) error {
+	title = strings.TrimSpace(title)
+	sm.mu.Lock()
+	sess, ok := sm.sessions[key]
+	if !ok {
+		now := time.Now()
+		sess = &Session{Key: key, Messages: []providers.Message{}, Created: now, Updated: now}
+		sm.sessions[key] = sess
+	}
+	sess.Title = title
+	sm.mu.Unlock()
+	return sm.Save(key)
+}
+
+func (sm *SessionManager) SetTitleIfEmpty(key, title string) (bool, error) {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return false, nil
+	}
+	sm.mu.Lock()
+	sess, ok := sm.sessions[key]
+	if !ok {
+		now := time.Now()
+		sess = &Session{Key: key, Messages: []providers.Message{}, Created: now, Updated: now}
+		sm.sessions[key] = sess
+	}
+	if strings.TrimSpace(sess.Title) != "" {
+		sm.mu.Unlock()
+		return false, nil
+	}
+	sess.Title = title
+	sm.mu.Unlock()
+	if err := sm.Save(key); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (sm *SessionManager) SetSummary(key string, summary string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -216,6 +255,7 @@ func (sm *SessionManager) Save(key string) error {
 
 	snapshot := Session{
 		Key:                 stored.Key,
+		Title:               stored.Title,
 		AgentPreset:         stored.AgentPreset,
 		AgentPresetOverride: stored.AgentPresetOverride,
 		Summary:             stored.Summary,

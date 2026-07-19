@@ -34,6 +34,10 @@ type agentPresetOverrideMetaStore interface {
 	SetSessionAgentPresetOverride(ctx context.Context, sessionKey, preset string, override bool) error
 }
 
+type titleMetaStore interface {
+	SetSessionTitle(ctx context.Context, sessionKey, title string, overwrite bool) (bool, error)
+}
+
 type aliasPromotingStore interface {
 	PromoteAliasHistory(ctx context.Context, sessionKey string, scope json.RawMessage, aliases []string) (bool, error)
 }
@@ -166,6 +170,25 @@ func (b *JSONLBackend) GetAgentPresetOverride(sessionKey string) (string, bool) 
 
 func (b *JSONLBackend) SetAgentPreset(sessionKey, preset string) error {
 	return b.SetAgentPresetOverride(sessionKey, preset, true)
+}
+
+func (b *JSONLBackend) SetTitle(sessionKey, title string) error {
+	store, ok := b.store.(titleMetaStore)
+	if !ok {
+		return fmt.Errorf("session metadata store does not support titles")
+	}
+	sessionKey = b.resolveSessionKey(sessionKey)
+	_, err := store.SetSessionTitle(context.Background(), sessionKey, title, true)
+	return err
+}
+
+func (b *JSONLBackend) SetTitleIfEmpty(sessionKey, title string) (bool, error) {
+	store, ok := b.store.(titleMetaStore)
+	if !ok {
+		return false, fmt.Errorf("session metadata store does not support titles")
+	}
+	sessionKey = b.resolveSessionKey(sessionKey)
+	return store.SetSessionTitle(context.Background(), sessionKey, title, false)
 }
 
 func (b *JSONLBackend) SetAgentPresetOverride(sessionKey, preset string, override bool) error {

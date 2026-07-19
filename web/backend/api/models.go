@@ -27,6 +27,7 @@ func (h *Handler) registerModelRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/models/catalog/{id}", h.handleDeleteCatalog)
 	mux.HandleFunc("POST /api/models", h.handleAddModel)
 	mux.HandleFunc("POST /api/models/default", h.handleSetDefaultModel)
+	mux.HandleFunc("POST /api/models/fast", h.handleSetFastModel)
 	mux.HandleFunc("POST /api/models/vision-fallback", h.handleSetVisionFallbackModel)
 	mux.HandleFunc("POST /api/models/image-generation", h.handleSetImageGenerationModel)
 	mux.HandleFunc("PUT /api/models/{index}", h.handleUpdateModel)
@@ -63,6 +64,7 @@ type modelResponse struct {
 	Available           bool   `json:"available"`
 	Status              string `json:"status"`
 	IsDefault           bool   `json:"is_default"`
+	IsFastModel         bool   `json:"is_fast_model"`
 	IsVirtual           bool   `json:"is_virtual"`
 	IsVisionFallback    bool   `json:"is_vision_fallback"`
 	IsImageGeneration   bool   `json:"is_image_generation"`
@@ -285,6 +287,7 @@ func (h *Handler) handleListModels(w http.ResponseWriter, r *http.Request) {
 	normalizeStoredModelProviders(cfg)
 
 	defaultModel := cfg.Agents.Defaults.GetModelName()
+	fastModel := strings.TrimSpace(cfg.Agents.Defaults.FastModel)
 	visionFallbackModel := strings.TrimSpace(cfg.Agents.Defaults.VisionFallbackModel)
 	imageGenerationModel := strings.TrimSpace(cfg.Agents.Defaults.ImageGenerationModel)
 	modelStatuses := make([]modelConfigurationSummary, len(cfg.ModelList))
@@ -326,6 +329,7 @@ func (h *Handler) handleListModels(w http.ResponseWriter, r *http.Request) {
 			Available:           modelStatuses[i].Available,
 			Status:              modelStatuses[i].Status,
 			IsDefault:           m.ModelName == defaultModel,
+			IsFastModel:         m.ModelName == fastModel,
 			IsVirtual:           m.IsVirtual(),
 			IsVisionFallback:    m.ModelName == visionFallbackModel,
 			IsImageGeneration:   m.ModelName == imageGenerationModel,
@@ -338,6 +342,7 @@ func (h *Handler) handleListModels(w http.ResponseWriter, r *http.Request) {
 		"models":                 models,
 		"total":                  len(models),
 		"default_model":          defaultModel,
+		"fast_model":             fastModel,
 		"vision_fallback_model":  visionFallbackModel,
 		"image_generation_model": imageGenerationModel,
 		"provider_options":       modelProviderOptionsForResponse(),
@@ -520,6 +525,13 @@ func (h *Handler) handleUpdateModel(w http.ResponseWriter, r *http.Request) {
 		// and clearing the default chat model reference in the same write.
 		cfg.Agents.Defaults.ModelName = ""
 	}
+	if cfg.Agents.Defaults.FastModel == existingModelName {
+		if defaultModelAllowedForModelConfig(&mc.ModelConfig) && !mc.IsVirtual() {
+			cfg.Agents.Defaults.FastModel = mc.ModelName
+		} else {
+			cfg.Agents.Defaults.FastModel = ""
+		}
+	}
 	if cfg.Agents.Defaults.VisionFallbackModel == existingModelName {
 		if mc.HasTag(config.ModelTagVision) {
 			cfg.Agents.Defaults.VisionFallbackModel = mc.ModelName
@@ -578,6 +590,9 @@ func (h *Handler) handleDeleteModel(w http.ResponseWriter, r *http.Request) {
 	// If the deleted model was the default, clear it.
 	if cfg.Agents.Defaults.ModelName == deletedModelName {
 		cfg.Agents.Defaults.ModelName = ""
+	}
+	if cfg.Agents.Defaults.FastModel == deletedModelName {
+		cfg.Agents.Defaults.FastModel = ""
 	}
 	if cfg.Agents.Defaults.VisionFallbackModel == deletedModelName {
 		cfg.Agents.Defaults.VisionFallbackModel = ""
@@ -669,6 +684,69 @@ func (h *Handler) handleSetDefaultModel(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":        "ok",
 		"default_model": req.ModelName,
+	})
+}
+
+// handleSetFastModel configures the model used for short background tasks.
+// An empty model_name disables those tasks.
+//
+//	POST /api/models/fast
+func (h *Handler) handleSetFastModel(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	var req struct {
+		ModelName string `json:"model_name"`
+	}
+	if err = json.Unmarshal(body, &req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+	req.ModelName = strings.TrimSpace(req.ModelName)
+
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if req.ModelName != "" {
+		found := false
+		for _, model := range cfg.ModelList {
+			if model == nil || model.ModelName != req.ModelName {
+				continue
+			}
+			found = true
+			if model.IsVirtual() {
+				http.Error(w, fmt.Sprintf("Cannot use virtual model %q as the fast model", req.ModelName), http.StatusBadRequest)
+				return
+			}
+			if !defaultModelAllowedForModelConfig(model) {
+				http.Error(w, fmt.Sprintf("Model %q cannot be used as a chat model", req.ModelName), http.StatusBadRequest)
+				return
+			}
+			break
+		}
+		if !found {
+			http.Error(w, fmt.Sprintf("Model %q not found in model_list", req.ModelName), http.StatusNotFound)
+			return
+		}
+	}
+
+	cfg.Agents.Defaults.FastModel = req.ModelName
+	if err = config.SaveConfig(h.configPath, cfg); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to save config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":     "ok",
+		"fast_model": req.ModelName,
 	})
 }
 

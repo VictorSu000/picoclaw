@@ -430,6 +430,9 @@ type AgentDefaults struct {
 	Provider                  string   `json:"provider"                         env:"PICOCLAW_AGENTS_DEFAULTS_PROVIDER"`
 	ModelName                 string   `json:"model_name"                       env:"PICOCLAW_AGENTS_DEFAULTS_MODEL_NAME"`
 	ModelFallbacks            []string `json:"model_fallbacks,omitempty"`
+	// FastModel is the model_list alias used for short background tasks such
+	// as generating a title after a session's first completed turn.
+	FastModel string `json:"fast_model,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_FAST_MODEL"`
 	// ImageModel is the dedicated model override for media turns.
 	ImageModel          string   `json:"image_model,omitempty"            env:"PICOCLAW_AGENTS_DEFAULTS_IMAGE_MODEL"`
 	ImageModelFallbacks []string `json:"image_model_fallbacks,omitempty"`

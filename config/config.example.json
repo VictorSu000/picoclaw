@@ -5,6 +5,7 @@
       "workspace": "~/.picoclaw/workspace",
       "restrict_to_workspace": true,
       "model_name": "gpt-5.4",
+      "fast_model": "",
       "image_generation_model": "openai-image",
       "image_generation_model_fallbacks": [],
       "max_tokens": 8192,

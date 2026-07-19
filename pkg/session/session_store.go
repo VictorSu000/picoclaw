@@ -46,6 +46,15 @@ type ArchivingSessionStore interface {
 	ArchiveMessages(sessionKey string, msgs []providers.Message)
 }
 
+// TitleSessionStore is the optional persistence capability used for generated
+// and user-supplied session titles.
+type TitleSessionStore interface {
+	// SetTitle overwrites the current title, including clearing it.
+	SetTitle(sessionKey, title string) error
+	// SetTitleIfEmpty stores title only when no title has been set yet.
+	SetTitleIfEmpty(sessionKey, title string) (bool, error)
+}
+
 // AgentPresetSessionStore is the optional persistence capability used by the
 // agent loop to remember the selected preset for one session.
 type AgentPresetSessionStore interface {

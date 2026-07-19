@@ -109,6 +109,39 @@ func (s *JSONLStore) SetSessionAgentPresetOverride(
 	return s.writeMeta(sessionKey, meta)
 }
 
+// SetSessionTitle updates a session title while preserving all other metadata.
+// When overwrite is false, an existing non-empty title is left unchanged.
+func (s *JSONLStore) SetSessionTitle(
+	_ context.Context,
+	sessionKey string,
+	title string,
+	overwrite bool,
+) (bool, error) {
+	l := s.sessionLock(sessionKey)
+	l.Lock()
+	defer l.Unlock()
+
+	meta, err := s.readMeta(sessionKey)
+	if err != nil {
+		return false, err
+	}
+	title = strings.TrimSpace(title)
+	if !overwrite && strings.TrimSpace(meta.Title) != "" {
+		return false, nil
+	}
+	if meta.Title == title {
+		return false, nil
+	}
+	meta.Title = title
+	if meta.CreatedAt.IsZero() {
+		meta.CreatedAt = time.Now()
+	}
+	if err := s.writeMeta(sessionKey, meta); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // JSONLStore implements Store using append-only JSONL files.
 //
 // Each session is stored as two files:
