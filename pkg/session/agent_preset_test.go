@@ -39,6 +39,15 @@ func TestAgentPresetPersistenceJSONLBackend(t *testing.T) {
 	if got := reloaded.GetAgentPreset("session-1"); got != "" {
 		t.Fatalf("reset GetAgentPreset() = %q, want empty", got)
 	}
+	if _, override := reloaded.GetAgentPresetOverride("session-1"); !override {
+		t.Fatal("SetAgentPreset with an empty name should persist an explicit default override")
+	}
+	if err := reloaded.SetAgentPresetOverride("session-1", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, override := reloaded.GetAgentPresetOverride("session-1"); override {
+		t.Fatal("cleared JSONL preset override was not persisted")
+	}
 }
 
 func TestAgentPresetPersistenceLegacySessionManager(t *testing.T) {
@@ -51,5 +60,12 @@ func TestAgentPresetPersistenceLegacySessionManager(t *testing.T) {
 	reloaded := session.NewSessionManager(dir)
 	if got := reloaded.GetAgentPreset("session-1"); got != "research" {
 		t.Fatalf("GetAgentPreset() = %q, want research", got)
+	}
+	if err := reloaded.SetAgentPresetOverride("session-1", "", false); err != nil {
+		t.Fatal(err)
+	}
+	reloaded = session.NewSessionManager(dir)
+	if _, override := reloaded.GetAgentPresetOverride("session-1"); override {
+		t.Fatal("cleared legacy session preset override was not persisted")
 	}
 }

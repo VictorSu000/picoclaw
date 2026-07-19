@@ -546,6 +546,8 @@
       "allowFromPlaceholder": "e.g. 123456, 789012",
       "allowOrigins": "Allow Origins",
       "allowOriginsPlaceholder": "e.g. https://example.com, http://localhost:5173",
+      "defaultPreset": "Default preset",
+      "defaultPresetAgent": "Default (Agent settings)",
       "removeListItem": "Remove {{value}}",
       "secretPlaceholder": "Enter secret",
       "secretHintSet": "A value is already set. Leave blank to keep it unchanged."
@@ -583,6 +585,7 @@
         "isLark": "Use Lark international domain (open.larksuite.com) instead of Feishu domain (open.feishu.cn).",
         "allowFrom": "Allowed user or group IDs. Add items one by one, or paste multiple values at once.",
         "allowOrigins": "Allowed origin domains. Add items one by one, or paste multiple values at once.",
+        "defaultPreset": "Preset inherited by sessions on this channel until the session explicitly selects another preset.",
         "wsUrl": "WebSocket service URL.",
         "reconnectInterval": "Reconnect interval after disconnection (seconds).",
         "bridgeUrl": "Bridge service URL.",

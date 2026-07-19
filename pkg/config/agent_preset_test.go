@@ -140,3 +140,20 @@ func TestValidateAgentPresets(t *testing.T) {
 		}
 	})
 }
+
+func TestValidateChannelDefaultPresets(t *testing.T) {
+	cfg := presetTestConfig()
+	cfg.AgentPresets = map[string]AgentPresetConfig{"coding": {}}
+	cfg.Channels = ChannelsConfig{
+		"telegram": {Type: ChannelTelegram, DefaultPreset: "Coding"},
+		"discord":  {Type: ChannelDiscord, DefaultPreset: DefaultAgentPresetName},
+	}
+	if err := cfg.ValidateChannelDefaultPresets(); err != nil {
+		t.Fatalf("ValidateChannelDefaultPresets() error = %v", err)
+	}
+
+	cfg.Channels["telegram"].DefaultPreset = "missing"
+	if err := cfg.ValidateChannelDefaultPresets(); err == nil {
+		t.Fatal("expected unknown channel default preset error")
+	}
+}

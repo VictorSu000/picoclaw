@@ -44,6 +44,7 @@ export interface LoadedSessionHistory {
   summary: string
   archivedCount: number
   agentPresetName: string
+  agentPresetOverride: boolean
   effectiveModelName?: string
 }
 
@@ -79,6 +80,7 @@ export function sessionDetailToLoadedHistory(
     summary: detail.summary ?? "",
     archivedCount: detail.archived_count ?? 0,
     agentPresetName: detail.agent_preset?.trim() || "default",
+    agentPresetOverride: detail.agent_preset_override === true,
     effectiveModelName: detail.effective_model?.trim() || undefined,
   }
 }

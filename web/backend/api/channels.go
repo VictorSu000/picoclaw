@@ -156,6 +156,9 @@ func defaultChannelConfig(configKey string) *config.Channel {
 
 func addChannelCommonConfig(settings map[string]any, bc *config.Channel) {
 	settings["enabled"] = bc.Enabled
+	if bc.DefaultPreset != "" {
+		settings["default_preset"] = bc.DefaultPreset
+	}
 	if len(bc.AllowFrom) > 0 {
 		settings["allow_from"] = []string(bc.AllowFrom)
 	}

@@ -27,8 +27,9 @@ type agentPresetListItem struct {
 }
 
 type agentPresetCatalogResponse struct {
-	DefaultModel string                `json:"default_model"`
-	Presets      []agentPresetListItem `json:"presets"`
+	DefaultModel  string                `json:"default_model"`
+	DefaultPreset string                `json:"default_preset"`
+	Presets       []agentPresetListItem `json:"presets"`
 }
 
 type setSessionAgentPresetRequest struct {
@@ -36,9 +37,10 @@ type setSessionAgentPresetRequest struct {
 }
 
 type sessionAgentPresetResponse struct {
-	AgentPreset    string   `json:"agent_preset"`
-	EffectiveModel string   `json:"effective_model"`
-	Fallbacks      []string `json:"fallbacks,omitempty"`
+	AgentPreset         string   `json:"agent_preset"`
+	AgentPresetOverride bool     `json:"agent_preset_override"`
+	EffectiveModel      string   `json:"effective_model"`
+	Fallbacks           []string `json:"fallbacks,omitempty"`
 }
 
 func agentPresetResponseName(name string) string {
@@ -148,6 +150,13 @@ func (h *Handler) handleListAgentPresets(w http.ResponseWriter, r *http.Request)
 
 	route, _ := picoRouteAllocation(cfg, r.URL.Query().Get("session_id"))
 	defaultModel, _, _ := effectiveModelForAgentPreset(cfg, route.AgentID, config.DefaultAgentPresetName)
+	defaultPreset := config.DefaultAgentPresetName
+	if channel := cfg.Channels.Get(config.ChannelPico); channel != nil {
+		name := strings.TrimSpace(channel.DefaultPreset)
+		if preset, found, resolveErr := cfg.ResolveAgentPreset(name); resolveErr == nil && found {
+			defaultPreset = preset.Name
+		}
+	}
 	items := make([]agentPresetListItem, 0, len(cfg.AgentPresets))
 	for _, name := range cfg.AgentPresetNames() {
 		preset, found, resolveErr := cfg.ResolveAgentPreset(name)
@@ -171,8 +180,9 @@ func (h *Handler) handleListAgentPresets(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(agentPresetCatalogResponse{
-		DefaultModel: defaultModel,
-		Presets:      items,
+		DefaultModel:  defaultModel,
+		DefaultPreset: defaultPreset,
+		Presets:       items,
 	})
 }
 
@@ -251,7 +261,9 @@ func (h *Handler) handleSetSessionAgentPreset(w http.ResponseWriter, r *http.Req
 			return
 		}
 	}
-	if err := store.SetSessionAgentPreset(context.Background(), sessionKey, storedName); err != nil {
+	if err := store.SetSessionAgentPresetOverride(
+		context.Background(), sessionKey, storedName, true,
+	); err != nil {
 		http.Error(w, "failed to save agent preset", http.StatusInternalServerError)
 		return
 	}
@@ -263,8 +275,9 @@ func (h *Handler) handleSetSessionAgentPreset(w http.ResponseWriter, r *http.Req
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(sessionAgentPresetResponse{
-		AgentPreset:    agentPresetResponseName(storedName),
-		EffectiveModel: effectiveModel,
-		Fallbacks:      fallbacks,
+		AgentPreset:         agentPresetResponseName(storedName),
+		AgentPresetOverride: true,
+		EffectiveModel:      effectiveModel,
+		Fallbacks:           fallbacks,
 	})
 }

@@ -52,3 +52,10 @@ type AgentPresetSessionStore interface {
 	GetAgentPreset(sessionKey string) string
 	SetAgentPreset(sessionKey, preset string) error
 }
+
+// AgentPresetOverrideSessionStore preserves whether a session explicitly
+// selected a preset or should inherit its channel's default.
+type AgentPresetOverrideSessionStore interface {
+	GetAgentPresetOverride(sessionKey string) (preset string, override bool)
+	SetAgentPresetOverride(sessionKey, preset string, override bool) error
+}

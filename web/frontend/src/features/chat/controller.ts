@@ -275,6 +275,7 @@ export async function hydrateActiveSession() {
         summary,
         archivedCount,
         agentPresetName,
+        agentPresetOverride,
         effectiveModelName,
       }) => {
         const currentState = getChatState()
@@ -292,6 +293,7 @@ export async function hydrateActiveSession() {
             sessionSummary: summary,
             archivedMessageCount: archivedCount,
             agentPresetName,
+            agentPresetOverride,
             effectiveModelName,
           })
           return
@@ -304,6 +306,7 @@ export async function hydrateActiveSession() {
           sessionSummary: summary,
           archivedMessageCount: archivedCount,
           agentPresetName,
+          agentPresetOverride,
           effectiveModelName,
         })
       },
@@ -425,6 +428,7 @@ export async function switchChatSession(sessionId: string) {
       summary,
       archivedCount,
       agentPresetName,
+      agentPresetOverride,
       effectiveModelName,
     } = await loadSessionMessages(sessionId)
 
@@ -438,6 +442,7 @@ export async function switchChatSession(sessionId: string) {
       sessionSummary: summary,
       archivedMessageCount: archivedCount,
       agentPresetName,
+      agentPresetOverride,
       effectiveModelName,
     })
 
@@ -470,6 +475,7 @@ export async function newChatSession() {
     sessionSummary: undefined,
     archivedMessageCount: undefined,
     agentPresetName: "default",
+    agentPresetOverride: false,
     effectiveModelName: undefined,
   })
 
@@ -531,6 +537,7 @@ export async function forkChatSession(visibleIndex: number) {
       summary,
       archivedCount,
       agentPresetName,
+      agentPresetOverride,
       effectiveModelName,
     } = await loadSessionMessages(newSessionId)
 
@@ -544,6 +551,7 @@ export async function forkChatSession(visibleIndex: number) {
       sessionSummary: summary,
       archivedMessageCount: archivedCount,
       agentPresetName,
+      agentPresetOverride,
       effectiveModelName,
     })
 
@@ -575,6 +583,7 @@ export async function deleteChatMessageSeries(visibleIndex: number) {
     summary,
     archivedCount,
     agentPresetName,
+    agentPresetOverride,
     effectiveModelName,
   } = sessionDetailToLoadedHistory(detail)
   updateChatStore({
@@ -584,6 +593,7 @@ export async function deleteChatMessageSeries(visibleIndex: number) {
     sessionSummary: summary,
     archivedMessageCount: archivedCount,
     agentPresetName,
+    agentPresetOverride,
     effectiveModelName,
   })
 }

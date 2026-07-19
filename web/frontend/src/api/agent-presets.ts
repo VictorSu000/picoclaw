@@ -9,11 +9,13 @@ export interface AgentPresetListItem {
 
 export interface AgentPresetCatalogResponse {
   default_model: string
+  default_preset: string
   presets: AgentPresetListItem[]
 }
 
 export interface SessionAgentPresetResponse {
   agent_preset: string
+  agent_preset_override: boolean
   effective_model: string
   fallbacks?: string[]
 }

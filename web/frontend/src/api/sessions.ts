@@ -41,6 +41,7 @@ export interface SessionDetail {
   messages: SessionDetailMessage[]
   summary: string
   agent_preset?: string
+  agent_preset_override?: boolean
   effective_model?: string
   archived_count?: number
   created: string

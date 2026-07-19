@@ -222,6 +222,7 @@ export function ChatPage() {
     sessionSummary,
     archivedMessageCount,
     agentPresetName,
+    agentPresetOverride,
     effectiveModelName: storedEffectiveModelName,
     sendMessage,
     switchSession,
@@ -255,10 +256,12 @@ export function ChatPage() {
     isPresetActive,
     effectiveModelName,
     fallbacks: presetFallbacks,
+    agentPresetName: effectiveAgentPresetName,
     changePreset,
   } = useAgentPresets({
     activeSessionId,
     agentPresetName,
+    agentPresetOverride,
     storedEffectiveModelName,
   })
   const selectedModelName = isPresetActive
@@ -521,7 +524,7 @@ export function ChatPage() {
                 disabledReason={
                   isPresetActive
                     ? `${t("chat.modelControlledByPreset", {
-                        name: agentPresetName,
+                        name: effectiveAgentPresetName,
                       })}${
                         presetFallbacks.length > 0
                           ? ` ${t("chat.presetFallbacks", {
@@ -538,7 +541,7 @@ export function ChatPage() {
               />
               {(presets.length > 0 || isPresetActive || presetsLoading) && (
                 <PresetSelector
-                  value={agentPresetName}
+                  value={effectiveAgentPresetName}
                   presets={presets}
                   disabled={isTyping || presetChanging || presetsLoading}
                   onValueChange={(value) => void changePreset(value)}

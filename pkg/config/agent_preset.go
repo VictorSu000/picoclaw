@@ -131,6 +131,30 @@ func (c *Config) ValidateAgentPresets() error {
 	return nil
 }
 
+// ValidateChannelDefaultPresets verifies that each configured channel default
+// refers to an existing agent preset. Empty and "default" mean agent defaults.
+func (c *Config) ValidateChannelDefaultPresets() error {
+	if c == nil {
+		return nil
+	}
+	for channelName, channel := range c.Channels {
+		if channel == nil {
+			continue
+		}
+		name := strings.TrimSpace(channel.DefaultPreset)
+		if name == "" || strings.EqualFold(name, DefaultAgentPresetName) {
+			continue
+		}
+		if _, found, err := c.ResolveAgentPreset(name); err != nil || !found {
+			if err != nil {
+				return fmt.Errorf("channel_list.%s.default_preset: %w", channelName, err)
+			}
+			return fmt.Errorf("channel_list.%s.default_preset: agent preset %q not found", channelName, name)
+		}
+	}
+	return nil
+}
+
 func (c *Config) validateAgentPreset(name string, preset AgentPresetConfig) error {
 	if preset.Model != nil {
 		primary := strings.TrimSpace(preset.Model.Primary)

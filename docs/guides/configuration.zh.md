@@ -175,6 +175,22 @@ PicoClaw 将数据存储在您配置的工作区中（默认：`~/.picoclaw/work
 
 如果 preset 引用了当前路由 Agent 不可用的 model、tool、skill 或 MCP server，切换时会返回明确错误。使用前需要先在公共配置中配置并启用这些依赖。
 
+每个频道实例可以配置未显式覆盖 preset 的 session 所继承的默认值：
+
+```json
+{
+  "channel_list": {
+    "telegram": {
+      "type": "telegram",
+      "default_preset": "coding",
+      "settings": {}
+    }
+  }
+}
+```
+
+省略 `default_preset`、设置为空或设置为 `default` 时，保持路由 Agent 的原有行为。`/preset use <name>` 会固定当前 session 的覆盖值，`/preset use default` 会明确固定为 Agent 默认设置，`/preset reset` 则清除覆盖并重新继承频道默认值。
+
 对话指令：
 
 ```text

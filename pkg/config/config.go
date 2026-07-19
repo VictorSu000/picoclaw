@@ -1569,6 +1569,9 @@ func LoadConfig(path string) (*Config, error) {
 	if err = cfg.ValidateAgentPresets(); err != nil {
 		return nil, err
 	}
+	if err = cfg.ValidateChannelDefaultPresets(); err != nil {
+		return nil, err
+	}
 
 	// Ensure Workspace has a default if not set
 	if cfg.Agents.Defaults.Workspace == "" {

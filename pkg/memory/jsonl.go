@@ -41,17 +41,18 @@ const (
 // Scope is stored as raw JSON so pkg/memory can stay decoupled from the
 // higher-level session package while still preserving structured scope data.
 type SessionMeta struct {
-	Key         string          `json:"key"`
-	Title       string          `json:"title,omitempty"`
-	AgentPreset string          `json:"agent_preset,omitempty"`
-	Summary     string          `json:"summary"`
-	Skip        int             `json:"skip"`
-	Count       int             `json:"count"`
-	CreatedAt   time.Time       `json:"created_at"`
-	UpdatedAt   time.Time       `json:"updated_at"`
-	Scope       json.RawMessage `json:"scope,omitempty"`
-	Aliases     []string        `json:"aliases,omitempty"`
-	Favorited   bool            `json:"favorited,omitempty"`
+	Key                 string          `json:"key"`
+	Title               string          `json:"title,omitempty"`
+	AgentPreset         string          `json:"agent_preset,omitempty"`
+	AgentPresetOverride bool            `json:"agent_preset_override,omitempty"`
+	Summary             string          `json:"summary"`
+	Skip                int             `json:"skip"`
+	Count               int             `json:"count"`
+	CreatedAt           time.Time       `json:"created_at"`
+	UpdatedAt           time.Time       `json:"updated_at"`
+	Scope               json.RawMessage `json:"scope,omitempty"`
+	Aliases             []string        `json:"aliases,omitempty"`
+	Favorited           bool            `json:"favorited,omitempty"`
 }
 
 // SetSessionAgentPreset updates only the request-time agent preset selection
@@ -70,6 +71,36 @@ func (s *JSONLStore) SetSessionAgentPreset(
 		return err
 	}
 	meta.AgentPreset = strings.TrimSpace(preset)
+	meta.AgentPresetOverride = true
+	now := time.Now()
+	if meta.CreatedAt.IsZero() {
+		meta.CreatedAt = now
+	}
+	meta.UpdatedAt = now
+	return s.writeMeta(sessionKey, meta)
+}
+
+// SetSessionAgentPresetOverride updates the session preset and whether it
+// explicitly overrides the channel default.
+func (s *JSONLStore) SetSessionAgentPresetOverride(
+	_ context.Context,
+	sessionKey string,
+	preset string,
+	override bool,
+) error {
+	if !override {
+		preset = ""
+	}
+	l := s.sessionLock(sessionKey)
+	l.Lock()
+	defer l.Unlock()
+
+	meta, err := s.readMeta(sessionKey)
+	if err != nil {
+		return err
+	}
+	meta.AgentPreset = strings.TrimSpace(preset)
+	meta.AgentPresetOverride = override
 	now := time.Now()
 	if meta.CreatedAt.IsZero() {
 		meta.CreatedAt = now
@@ -466,6 +497,14 @@ func (s *JSONLStore) promoteAliasHistoryLocked(
 	canonicalMeta.UpdatedAt = now
 	if aliasSummary != "" {
 		canonicalMeta.Summary = aliasSummary
+	}
+	canonicalPreset := strings.TrimSpace(canonicalMeta.AgentPreset)
+	aliasPreset := strings.TrimSpace(aliasMeta.AgentPreset)
+	canonicalOverride := canonicalMeta.AgentPresetOverride || canonicalPreset != ""
+	aliasOverride := aliasMeta.AgentPresetOverride || aliasPreset != ""
+	if !canonicalOverride && aliasOverride {
+		canonicalMeta.AgentPreset = aliasPreset
+		canonicalMeta.AgentPresetOverride = true
 	}
 
 	if err := s.rewriteJSONL(sessionKey, aliasHistory); err != nil {

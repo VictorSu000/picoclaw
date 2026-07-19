@@ -40,12 +40,13 @@ func (h *Handler) registerSessionRoutes(mux *http.ServeMux) {
 
 // sessionFile mirrors the on-disk session JSON structure from pkg/session.
 type sessionFile struct {
-	Key         string              `json:"key"`
-	AgentPreset string              `json:"agent_preset,omitempty"`
-	Messages    []providers.Message `json:"messages"`
-	Summary     string              `json:"summary,omitempty"`
-	Created     time.Time           `json:"created"`
-	Updated     time.Time           `json:"updated"`
+	Key                 string              `json:"key"`
+	AgentPreset         string              `json:"agent_preset,omitempty"`
+	AgentPresetOverride bool                `json:"agent_preset_override,omitempty"`
+	Messages            []providers.Message `json:"messages"`
+	Summary             string              `json:"summary,omitempty"`
+	Created             time.Time           `json:"created"`
+	Updated             time.Time           `json:"updated"`
 
 	// ArchivedRawCount is the number of leading Messages that were dropped from
 	// the active history by context compaction and restored from the archive
@@ -84,14 +85,15 @@ type sessionChatAttachment struct {
 }
 
 type sessionDetailResponse struct {
-	ID             string               `json:"id"`
-	Messages       []sessionChatMessage `json:"messages"`
-	Summary        string               `json:"summary"`
-	AgentPreset    string               `json:"agent_preset,omitempty"`
-	EffectiveModel string               `json:"effective_model,omitempty"`
-	ArchivedCount  int                  `json:"archived_count"`
-	Created        string               `json:"created"`
-	Updated        string               `json:"updated"`
+	ID                  string               `json:"id"`
+	Messages            []sessionChatMessage `json:"messages"`
+	Summary             string               `json:"summary"`
+	AgentPreset         string               `json:"agent_preset,omitempty"`
+	AgentPresetOverride bool                 `json:"agent_preset_override"`
+	EffectiveModel      string               `json:"effective_model,omitempty"`
+	ArchivedCount       int                  `json:"archived_count"`
+	Created             string               `json:"created"`
+	Updated             string               `json:"updated"`
 }
 
 // legacyPicoSessionPrefix is the legacy key prefix used by older Pico JSON/JSONL
@@ -139,6 +141,7 @@ func (h *Handler) readLegacySession(path string) (sessionFile, error) {
 	if err := json.Unmarshal(data, &sess); err != nil {
 		return sessionFile{}, err
 	}
+	sess.AgentPresetOverride = sess.AgentPresetOverride || strings.TrimSpace(sess.AgentPreset) != ""
 	return sess, nil
 }
 
@@ -258,13 +261,14 @@ func (h *Handler) readJSONLSession(dir, sessionKey string) (sessionFile, error) 
 	}
 
 	return sessionFile{
-		Key:              meta.Key,
-		AgentPreset:      meta.AgentPreset,
-		Messages:         messages,
-		Summary:          meta.Summary,
-		Created:          created,
-		Updated:          updated,
-		ArchivedRawCount: len(archived),
+		Key:                 meta.Key,
+		AgentPreset:         meta.AgentPreset,
+		AgentPresetOverride: meta.AgentPresetOverride || strings.TrimSpace(meta.AgentPreset) != "",
+		Messages:            messages,
+		Summary:             meta.Summary,
+		Created:             created,
+		Updated:             updated,
+		ArchivedRawCount:    len(archived),
 	}, nil
 }
 
@@ -1032,9 +1036,18 @@ func (h *Handler) buildSessionDetailResponse(
 	messages := detailSessionMessages(sess.Messages, toolFeedbackMaxArgsLength)
 	cfg, configErr := config.LoadConfig(h.configPath)
 	effectiveModel := ""
+	effectivePreset := strings.TrimSpace(sess.AgentPreset)
 	if configErr == nil {
 		route, _ := picoRouteAllocation(cfg, sessionID)
-		effectiveModel, _, _ = effectiveModelForAgentPreset(cfg, route.AgentID, sess.AgentPreset)
+		if !sess.AgentPresetOverride {
+			if channel := cfg.Channels.Get("pico"); channel != nil {
+				effectivePreset = strings.TrimSpace(channel.DefaultPreset)
+				if preset, found, resolveErr := cfg.ResolveAgentPreset(effectivePreset); resolveErr == nil && found {
+					effectivePreset = preset.Name
+				}
+			}
+		}
+		effectiveModel, _, _ = effectiveModelForAgentPreset(cfg, route.AgentID, effectivePreset)
 	}
 
 	// archivedCount is the number of leading transcript entries that come from
@@ -1045,14 +1058,15 @@ func (h *Handler) buildSessionDetailResponse(
 	archivedCount := len(detailSessionMessages(archivedRaw, toolFeedbackMaxArgsLength))
 
 	return sessionDetailResponse{
-		ID:             sessionID,
-		Messages:       messages,
-		Summary:        sess.Summary,
-		AgentPreset:    agentPresetResponseName(sess.AgentPreset),
-		EffectiveModel: effectiveModel,
-		ArchivedCount:  archivedCount,
-		Created:        sess.Created.Format(time.RFC3339),
-		Updated:        sess.Updated.Format(time.RFC3339),
+		ID:                  sessionID,
+		Messages:            messages,
+		Summary:             sess.Summary,
+		AgentPreset:         agentPresetResponseName(effectivePreset),
+		AgentPresetOverride: sess.AgentPresetOverride,
+		EffectiveModel:      effectiveModel,
+		ArchivedCount:       archivedCount,
+		Created:             sess.Created.Format(time.RFC3339),
+		Updated:             sess.Updated.Format(time.RFC3339),
 	}
 }
 
@@ -1903,13 +1917,14 @@ func (h *Handler) handleForkSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	meta := memory.SessionMeta{
-		Key:         newSessionKey,
-		AgentPreset: sess.AgentPreset,
-		Count:       len(forkedMessages),
-		CreatedAt:   now,
-		UpdatedAt:   now,
-		Scope:       scopeData,
-		Aliases:     append([]string(nil), allocation.SessionAliases...),
+		Key:                 newSessionKey,
+		AgentPreset:         sess.AgentPreset,
+		AgentPresetOverride: sess.AgentPresetOverride,
+		Count:               len(forkedMessages),
+		CreatedAt:           now,
+		UpdatedAt:           now,
+		Scope:               scopeData,
+		Aliases:             append([]string(nil), allocation.SessionAliases...),
 	}
 
 	metaData, err := json.MarshalIndent(meta, "", "  ")

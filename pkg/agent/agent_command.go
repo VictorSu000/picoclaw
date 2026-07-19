@@ -211,7 +211,7 @@ func (al *AgentLoop) applyPresetCommand(
 		if copyOpts.AgentPreset.Enabled() {
 			storedName = copyOpts.AgentPreset.Name
 		}
-		if err := setSessionAgentPreset(agent, opts.Dispatch.SessionKey, storedName); err != nil {
+		if err := setSessionAgentPresetOverride(agent, opts.Dispatch.SessionKey, storedName, true); err != nil {
 			return true, true, fmt.Sprintf("Failed to save agent preset: %v", err)
 		}
 		al.clearPendingSkills(opts.Dispatch.SessionKey)
@@ -221,10 +221,14 @@ func (al *AgentLoop) applyPresetCommand(
 		return true, true, fmt.Sprintf("Agent preset switched to %q for this session.", storedName)
 
 	case "reset":
-		if err := setSessionAgentPreset(agent, opts.Dispatch.SessionKey, ""); err != nil {
+		if err := setSessionAgentPresetOverride(agent, opts.Dispatch.SessionKey, "", false); err != nil {
 			return true, true, fmt.Sprintf("Failed to reset agent preset: %v", err)
 		}
 		al.clearPendingSkills(opts.Dispatch.SessionKey)
+		channelDefault := al.channelDefaultPreset(opts.Dispatch.Channel())
+		if channelDefault != "" && !strings.EqualFold(channelDefault, config.DefaultAgentPresetName) {
+			return true, true, fmt.Sprintf("Agent preset reset to channel default %q.", channelDefault)
+		}
 		return true, true, "Agent preset reset to default."
 
 	case "run":

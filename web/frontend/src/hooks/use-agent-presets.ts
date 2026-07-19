@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
@@ -12,12 +12,14 @@ import { getChatState, updateChatStore } from "@/store/chat"
 interface UseAgentPresetsOptions {
   activeSessionId: string
   agentPresetName: string
+  agentPresetOverride: boolean
   storedEffectiveModelName?: string
 }
 
 export function useAgentPresets({
   activeSessionId,
   agentPresetName,
+  agentPresetOverride,
   storedEffectiveModelName,
 }: UseAgentPresetsOptions) {
   const { t } = useTranslation()
@@ -27,26 +29,26 @@ export function useAgentPresets({
     queryFn: () => getAgentPresets(activeSessionId),
   })
 
-  const selectedPreset = useMemo(
-    () =>
-      data?.presets.find(
-        (preset) =>
-          preset.name.toLowerCase() === agentPresetName.toLowerCase(),
-      ),
-    [agentPresetName, data?.presets],
+  const inheritedPresetName = data?.default_preset?.trim() || "default"
+  const effectivePresetName = agentPresetOverride
+    ? agentPresetName
+    : inheritedPresetName
+  const isPresetActive = effectivePresetName.trim().toLowerCase() !== "default"
+  const effectiveSelectedPreset = data?.presets.find(
+    (preset) =>
+      preset.name.toLowerCase() === effectivePresetName.toLowerCase(),
   )
-  const isPresetActive = agentPresetName.trim().toLowerCase() !== "default"
   const effectiveModelName = isPresetActive
-    ? selectedPreset?.effective_model || storedEffectiveModelName || ""
+    ? effectiveSelectedPreset?.effective_model || storedEffectiveModelName || ""
     : data?.default_model || storedEffectiveModelName || ""
-  const fallbacks = isPresetActive
-    ? (selectedPreset?.fallbacks ?? [])
+  const effectiveFallbacks = isPresetActive
+    ? (effectiveSelectedPreset?.fallbacks ?? [])
     : []
 
   const changePreset = useCallback(
     async (nextName: string) => {
       const normalized = nextName.trim() || "default"
-      if (normalized.toLowerCase() === agentPresetName.toLowerCase()) {
+      if (normalized.toLowerCase() === effectivePresetName.toLowerCase()) {
         return
       }
 
@@ -61,6 +63,7 @@ export function useAgentPresets({
         if (sessionStillActive) {
           updateChatStore({
             agentPresetName: result.agent_preset?.trim() || "default",
+            agentPresetOverride: result.agent_preset_override === true,
             effectiveModelName: result.effective_model?.trim() || undefined,
           })
           toast.success(t("chat.presetChanged", { name: normalized }))
@@ -75,7 +78,7 @@ export function useAgentPresets({
         setIsChanging(false)
       }
     },
-    [activeSessionId, agentPresetName, t],
+    [activeSessionId, effectivePresetName, t],
   )
 
   return {
@@ -84,7 +87,8 @@ export function useAgentPresets({
     isChanging,
     isPresetActive,
     effectiveModelName,
-    fallbacks,
+    fallbacks: effectiveFallbacks,
+    agentPresetName: effectivePresetName,
     changePreset,
   }
 }

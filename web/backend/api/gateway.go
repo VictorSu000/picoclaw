@@ -709,6 +709,7 @@ func computeChannelSignatures(channels config.ChannelsConfig) []string {
 		payload := struct {
 			Enabled            bool                       `json:"enabled"`
 			Type               string                     `json:"type"`
+			DefaultPreset      string                     `json:"default_preset,omitempty"`
 			AllowFrom          config.FlexibleStringSlice `json:"allow_from,omitempty"`
 			ReasoningChannelID string                     `json:"reasoning_channel_id,omitempty"`
 			GroupTrigger       config.GroupTriggerConfig  `json:"group_trigger,omitempty"`
@@ -718,6 +719,7 @@ func computeChannelSignatures(channels config.ChannelsConfig) []string {
 		}{
 			Enabled:            channel.Enabled,
 			Type:               channel.Type,
+			DefaultPreset:      channel.DefaultPreset,
 			AllowFrom:          channel.AllowFrom,
 			ReasoningChannelID: channel.ReasoningChannelID,
 			GroupTrigger:       channel.GroupTrigger,

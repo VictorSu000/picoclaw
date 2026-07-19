@@ -80,6 +80,7 @@ export interface ChatStoreState {
   // from the compaction archive (view-only; not part of the LLM context).
   archivedMessageCount?: number
   agentPresetName: string
+  agentPresetOverride: boolean
   effectiveModelName?: string
 }
 
@@ -92,6 +93,7 @@ const DEFAULT_CHAT_STATE: ChatStoreState = {
   activeSessionId: getInitialActiveSessionId(),
   hasHydratedActiveSession: false,
   agentPresetName: "default",
+  agentPresetOverride: false,
 }
 
 export const chatAtom = atom<ChatStoreState>(DEFAULT_CHAT_STATE)

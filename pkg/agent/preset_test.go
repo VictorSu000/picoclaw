@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/providers"
 	"github.com/sipeed/picoclaw/pkg/session"
@@ -172,6 +173,43 @@ func TestPresetCommandPersistentAndTemporarySelection(t *testing.T) {
 	}
 	if got := store.GetAgentPreset("session-1"); got != "coding" {
 		t.Fatalf("temporary run changed stored preset to %q", got)
+	}
+}
+
+func TestChannelDefaultPresetAndExplicitSessionDefault(t *testing.T) {
+	cfg := &config.Config{
+		AgentPresets: map[string]config.AgentPresetConfig{"coding": {}},
+		Channels: config.ChannelsConfig{
+			"telegram": {Type: config.ChannelTelegram, DefaultPreset: "coding"},
+		},
+	}
+	al := &AgentLoop{cfg: cfg}
+	manager := session.NewSessionManager("")
+	agent := &AgentInstance{Sessions: manager, Tools: tools.NewToolRegistry()}
+	base := processOptions{Dispatch: DispatchRequest{
+		SessionKey:     "session-1",
+		InboundContext: &bus.InboundContext{Channel: "telegram"},
+	}}
+
+	resolved, err := al.resolveAgentPresetOptions(agent, base)
+	if err != nil || resolved.AgentPreset.Name != "coding" {
+		t.Fatalf("channel default resolution = (%+v, %v), want coding", resolved.AgentPreset, err)
+	}
+
+	if err := manager.SetAgentPresetOverride("session-1", "", true); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err = al.resolveAgentPresetOptions(agent, base)
+	if err != nil || resolved.AgentPreset.Enabled() {
+		t.Fatalf("explicit default resolution = (%+v, %v), want agent default", resolved.AgentPreset, err)
+	}
+
+	if err := manager.SetAgentPresetOverride("session-1", "", false); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err = al.resolveAgentPresetOptions(agent, base)
+	if err != nil || resolved.AgentPreset.Name != "coding" {
+		t.Fatalf("reset resolution = (%+v, %v), want coding", resolved.AgentPreset, err)
 	}
 }
 

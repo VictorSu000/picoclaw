@@ -29,6 +29,11 @@ type agentPresetMetaStore interface {
 	SetSessionAgentPreset(ctx context.Context, sessionKey, preset string) error
 }
 
+type agentPresetOverrideMetaStore interface {
+	GetSessionMeta(ctx context.Context, sessionKey string) (memory.SessionMeta, error)
+	SetSessionAgentPresetOverride(ctx context.Context, sessionKey, preset string, override bool) error
+}
+
 type aliasPromotingStore interface {
 	PromoteAliasHistory(ctx context.Context, sessionKey string, scope json.RawMessage, aliases []string) (bool, error)
 }
@@ -144,7 +149,30 @@ func (b *JSONLBackend) GetAgentPreset(sessionKey string) string {
 	return strings.TrimSpace(meta.AgentPreset)
 }
 
+func (b *JSONLBackend) GetAgentPresetOverride(sessionKey string) (string, bool) {
+	store, ok := b.store.(agentPresetMetaStore)
+	if !ok {
+		return "", false
+	}
+	sessionKey = b.resolveSessionKey(sessionKey)
+	meta, err := store.GetSessionMeta(context.Background(), sessionKey)
+	if err != nil {
+		log.Printf("session: get agent preset override: %v", err)
+		return "", false
+	}
+	preset := strings.TrimSpace(meta.AgentPreset)
+	return preset, meta.AgentPresetOverride || preset != ""
+}
+
 func (b *JSONLBackend) SetAgentPreset(sessionKey, preset string) error {
+	return b.SetAgentPresetOverride(sessionKey, preset, true)
+}
+
+func (b *JSONLBackend) SetAgentPresetOverride(sessionKey, preset string, override bool) error {
+	if store, ok := b.store.(agentPresetOverrideMetaStore); ok {
+		sessionKey = b.resolveSessionKey(sessionKey)
+		return store.SetSessionAgentPresetOverride(context.Background(), sessionKey, strings.TrimSpace(preset), override)
+	}
 	store, ok := b.store.(agentPresetMetaStore)
 	if !ok {
 		return fmt.Errorf("session metadata store does not support agent presets")

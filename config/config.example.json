@@ -139,6 +139,7 @@
     "telegram": {
       "enabled": false,
       "type": "telegram",
+      "default_preset": "",
       "allow_from": ["YOUR_USER_ID"],
       "reasoning_channel_id": "",
       "settings": {

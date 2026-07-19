@@ -3,6 +3,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import {
+  type AgentPresetListItem,
+  getAgentPresets,
+} from "@/api/agent-presets"
+import {
   type ChannelConfig,
   type SupportedChannel,
   getChannelConfig,
@@ -31,7 +35,16 @@ import { WecomForm } from "@/components/channels/channel-forms/wecom-form"
 import { WeixinForm } from "@/components/channels/channel-forms/weixin-form"
 import { ConfigChangeNotice } from "@/components/config-change-notice"
 import { PageHeader } from "@/components/page-header"
+import { Field } from "@/components/shared-form"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { useGateway } from "@/hooks/use-gateway"
 import { showSaveSuccessOrRestartToast } from "@/lib/restart-required"
@@ -95,6 +108,7 @@ function serializeGroupTriggerForSubmit(value: unknown): unknown {
 
 const CHANNEL_COMMON_CONFIG_KEYS = new Set([
   "allow_from",
+  "default_preset",
   "group_trigger",
   "placeholder",
   "reasoning_channel_id",
@@ -298,6 +312,7 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
 
   const [channel, setChannel] = useState<SupportedChannel | null>(null)
+  const [agentPresets, setAgentPresets] = useState<AgentPresetListItem[]>([])
   const [baseConfig, setBaseConfig] = useState<ChannelConfig>({})
   const [editConfig, setEditConfig] = useState<ChannelConfig>({})
   const [configuredSecrets, setConfiguredSecrets] = useState<string[]>([])
@@ -309,6 +324,7 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
   const resetPageState = useCallback(() => {
     arrayFieldFlushersRef.current.clear()
     setChannel(null)
+    setAgentPresets([])
     setBaseConfig({})
     setEditConfig({})
     setConfiguredSecrets([])
@@ -340,12 +356,16 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
           return
         }
 
-        const channelConfig = await getChannelConfig(channelName)
+        const [channelConfig, presetCatalog] = await Promise.all([
+          getChannelConfig(channelName),
+          getAgentPresets(""),
+        ])
         if (loadRequestIdRef.current !== requestId) return
         const raw = asRecord(channelConfig.config)
         const normalized = normalizeConfig(matched, raw)
 
         setChannel(matched)
+        setAgentPresets(presetCatalog.presets ?? [])
         setBaseConfig(normalized)
         setEditConfig(buildEditConfig(matched.name, normalized))
         setConfiguredSecrets(channelConfig.configured_secrets ?? [])
@@ -723,6 +743,47 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
                 <Switch checked={enabled} onCheckedChange={setEnabled} />
               </div>
             )}
+
+            <Card className="shadow-sm">
+              <CardContent className="px-6 py-5">
+                <Field
+                  label={t("channels.field.defaultPreset")}
+                  hint={t("channels.form.desc.defaultPreset")}
+                >
+                  <Select
+                    value={
+                      agentPresets.find(
+                        (preset) =>
+                          preset.name.toLowerCase() ===
+                          asString(editConfig.default_preset)
+                            .trim()
+                            .toLowerCase(),
+                      )?.name ?? "default"
+                    }
+                    onValueChange={(value) =>
+                      handleChange(
+                        "default_preset",
+                        value === "default" ? "" : value,
+                      )
+                    }
+                  >
+                    <SelectTrigger className="w-full sm:w-80">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="default">
+                        {t("channels.field.defaultPresetAgent")}
+                      </SelectItem>
+                      {agentPresets.map((preset) => (
+                        <SelectItem key={preset.name} value={preset.name}>
+                          {preset.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </CardContent>
+            </Card>
 
             {renderForm()}
 

@@ -27,25 +27,83 @@ func (al *AgentLoop) resolveAgentPresetOptions(
 	if !ok {
 		return opts, nil
 	}
-	presetName := strings.TrimSpace(store.GetAgentPreset(opts.Dispatch.SessionKey))
-	if presetName == "" {
+	presetName, override := sessionAgentPresetOverride(store, opts.Dispatch.SessionKey)
+	if !override {
+		presetName = al.channelDefaultPreset(opts.Dispatch.Channel())
+	}
+	if presetName == "" || strings.EqualFold(presetName, config.DefaultAgentPresetName) {
 		return opts, nil
 	}
 
 	preset, found, err := al.GetConfig().ResolveAgentPreset(presetName)
 	if err != nil || !found {
-		_ = store.SetAgentPreset(opts.Dispatch.SessionKey, "")
+		if override {
+			_ = clearSessionAgentPresetOverride(store, opts.Dispatch.SessionKey)
+			if err == nil {
+				err = fmt.Errorf("agent preset %q not found", presetName)
+			}
+			return opts, fmt.Errorf("selected agent preset is no longer available and was reset: %w", err)
+		}
 		if err == nil {
 			err = fmt.Errorf("agent preset %q not found", presetName)
 		}
-		return opts, fmt.Errorf("selected agent preset is no longer available and was reset: %w", err)
+		return opts, fmt.Errorf("channel default agent preset is unavailable: %w", err)
 	}
 	if err := validateAgentPresetForAgent(al.GetConfig(), agent, preset); err != nil {
-		_ = store.SetAgentPreset(opts.Dispatch.SessionKey, "")
-		return opts, fmt.Errorf("selected agent preset is no longer valid and was reset: %w", err)
+		if override {
+			_ = clearSessionAgentPresetOverride(store, opts.Dispatch.SessionKey)
+			return opts, fmt.Errorf("selected agent preset is no longer valid and was reset: %w", err)
+		}
+		return opts, fmt.Errorf("channel default agent preset is unavailable: %w", err)
 	}
 	opts.AgentPreset = preset
 	return opts, nil
+}
+
+func (al *AgentLoop) channelDefaultPreset(channel string) string {
+	if al == nil || al.GetConfig() == nil {
+		return ""
+	}
+	if configured := al.GetConfig().Channels.Get(strings.TrimSpace(channel)); configured != nil {
+		return strings.TrimSpace(configured.DefaultPreset)
+	}
+	return ""
+}
+
+func sessionAgentPresetOverride(store session.AgentPresetSessionStore, sessionKey string) (string, bool) {
+	if overrideStore, ok := store.(session.AgentPresetOverrideSessionStore); ok {
+		return overrideStore.GetAgentPresetOverride(sessionKey)
+	}
+	preset := strings.TrimSpace(store.GetAgentPreset(sessionKey))
+	return preset, preset != ""
+}
+
+func setSessionAgentPresetOverride(
+	agent *AgentInstance,
+	sessionKey, preset string,
+	override bool,
+) error {
+	if agent == nil || agent.Sessions == nil {
+		return fmt.Errorf("session store is unavailable")
+	}
+	store, ok := agent.Sessions.(session.AgentPresetSessionStore)
+	if !ok {
+		return fmt.Errorf("session store does not support agent presets")
+	}
+	if overrideStore, ok := store.(session.AgentPresetOverrideSessionStore); ok {
+		return overrideStore.SetAgentPresetOverride(sessionKey, strings.TrimSpace(preset), override)
+	}
+	if !override {
+		return store.SetAgentPreset(sessionKey, "")
+	}
+	return store.SetAgentPreset(sessionKey, strings.TrimSpace(preset))
+}
+
+func clearSessionAgentPresetOverride(store session.AgentPresetSessionStore, sessionKey string) error {
+	if overrideStore, ok := store.(session.AgentPresetOverrideSessionStore); ok {
+		return overrideStore.SetAgentPresetOverride(sessionKey, "", false)
+	}
+	return store.SetAgentPreset(sessionKey, "")
 }
 
 func applyAgentPresetToOptions(
@@ -164,17 +222,6 @@ func resolveMCPServerConfig(
 		}
 	}
 	return "", config.MCPServerConfig{}, false
-}
-
-func setSessionAgentPreset(agent *AgentInstance, sessionKey, presetName string) error {
-	if agent == nil || agent.Sessions == nil {
-		return fmt.Errorf("session store is unavailable")
-	}
-	store, ok := agent.Sessions.(session.AgentPresetSessionStore)
-	if !ok {
-		return fmt.Errorf("session store does not support agent presets")
-	}
-	return store.SetAgentPreset(sessionKey, strings.TrimSpace(presetName))
 }
 
 func agentPresetSkillAllowed(preset config.EffectiveAgentPreset, name string) bool {

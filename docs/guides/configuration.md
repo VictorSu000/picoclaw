@@ -177,6 +177,22 @@ All fields are optional. An omitted field inherits the routed agent's behavior, 
 
 Preset selection is rejected with a clear error if it references a model, tool, skill, or MCP server that is unavailable to the routed agent. Configure and enable those dependencies globally before selecting the preset.
 
+A channel instance can provide the preset inherited by sessions that have no explicit override:
+
+```json
+{
+  "channel_list": {
+    "telegram": {
+      "type": "telegram",
+      "default_preset": "coding",
+      "settings": {}
+    }
+  }
+}
+```
+
+Omitting `default_preset`, leaving it empty, or setting it to `default` keeps the routed Agent's normal behavior. `/preset use <name>` pins a session override, `/preset use default` explicitly pins the Agent defaults, and `/preset reset` clears the override so the session inherits the channel default again.
+
 Use presets in a conversation with:
 
 ```text
