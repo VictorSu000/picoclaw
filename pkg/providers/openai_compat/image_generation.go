@@ -20,7 +20,7 @@ import (
 
 	"github.com/sipeed/picoclaw/pkg/providers/common"
 	"github.com/sipeed/picoclaw/pkg/providers/protocoltypes"
-	"github.com/sipeed/picoclaw/pkg/utils"
+	"github.com/sipeed/picoclaw/pkg/safehttp"
 )
 
 const (
@@ -446,12 +446,12 @@ func (p *Provider) downloadGeneratedImage(ctx context.Context, rawURL string, ma
 	}
 
 	allowSamePrivateHost := samePrivateEndpointHost(p.apiBase, rawURL)
-	if utils.IsObviousPrivateHost(parsed.Hostname(), nil, func() bool {
+	if safehttp.IsObviousPrivateHost(parsed.Hostname(), nil, func() bool {
 		return allowSamePrivateHost
 	}) {
 		return nil, fmt.Errorf("generated image URL targets a private or local network host")
 	}
-	client, err := utils.CreateSafeHTTPClient(utils.SafeHTTPClientOptions{
+	client, err := safehttp.CreateSafeHTTPClient(safehttp.SafeHTTPClientOptions{
 		ProxyURL:     p.proxy,
 		Timeout:      imageDownloadTimeout(p.httpClient.Timeout),
 		MaxRedirects: maxImageDownloadRedirects,
@@ -474,7 +474,7 @@ func (p *Provider) downloadGeneratedImage(ctx context.Context, rawURL string, ma
 	if err != nil {
 		return nil, fmt.Errorf("create generated image download request: %w", err)
 	}
-	utils.AllowConfiguredProxyFirstHop(req, client.Transport)
+	safehttp.AllowConfiguredProxyFirstHop(req, client.Transport)
 	if p.userAgent != "" {
 		req.Header.Set("User-Agent", p.userAgent)
 	}
@@ -505,5 +505,5 @@ func samePrivateEndpointHost(apiBase, imageURL string) bool {
 	if baseErr != nil || imageErr != nil || !strings.EqualFold(base.Hostname(), image.Hostname()) {
 		return false
 	}
-	return utils.IsObviousPrivateHost(base.Hostname(), nil, nil)
+	return safehttp.IsObviousPrivateHost(base.Hostname(), nil, nil)
 }
