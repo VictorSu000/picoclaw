@@ -254,6 +254,86 @@ func TestHandleUpdateToolState(t *testing.T) {
 	}
 }
 
+func TestHandleListTools_IncludesImageGenerate(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	cfg.Tools.ImageGenerate.Enabled = false
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/tools", nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp toolSupportResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+
+	for _, tool := range resp.Tools {
+		if tool.Name == "image_generate" {
+			if tool.Status != "disabled" {
+				t.Fatalf("image_generate status = %q, want disabled", tool.Status)
+			}
+			return
+		}
+	}
+	t.Fatal("expected image_generate in response")
+}
+
+func TestHandleUpdateToolState_EnablesImageGenerate(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	cfg.Tools.ImageGenerate.Enabled = false
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/api/tools/image_generate/state",
+		bytes.NewBufferString(`{"enabled":true}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("image_generate status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	updated, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig(updated) error = %v", err)
+	}
+	if !updated.Tools.ImageGenerate.Enabled {
+		t.Fatalf("image_generate should be enabled: %#v", updated.Tools.ImageGenerate)
+	}
+}
+
 func TestHandleListTools_ReportsWebSearchEnabledWhenToolIsOn(t *testing.T) {
 	tests := []struct {
 		name         string

@@ -137,6 +137,12 @@ var toolCatalog = []toolCatalogEntry{
 		ConfigKey:   "send_file",
 	},
 	{
+		Name:        "image_generate",
+		Description: "Generate or edit images using the configured image generation model.",
+		Category:    "vision",
+		ConfigKey:   "image_generate",
+	},
+	{
 		Name:        "find_skills",
 		Description: "Search external skill registries for installable skills.",
 		Category:    "skills",
@@ -379,6 +385,8 @@ func applyToolState(cfg *config.Config, toolName string, enabled bool) error {
 			cfg.Tools.Spawn.Enabled = true
 			cfg.Tools.Subagent.Enabled = true
 		}
+	case "image_generate":
+		cfg.Tools.ImageGenerate.Enabled = enabled
 	case "i2c":
 		cfg.Tools.I2C.Enabled = enabled
 	case "spi":
