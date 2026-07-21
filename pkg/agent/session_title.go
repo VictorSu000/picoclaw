@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	sessionTitleTimeout       = 20 * time.Second
+	sessionTitleTimeout       = 300 * time.Second
 	sessionTitleMaxRunes      = 60
 	sessionTitleInputMaxRunes = 2000
 )
