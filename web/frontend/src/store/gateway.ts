@@ -26,8 +26,8 @@ const DEFAULT_GATEWAY_STATE: GatewayStoreState = {
   restartRequired: false,
 }
 
-const GATEWAY_POLL_INTERVAL_MS = 2000
-const GATEWAY_TRANSIENT_POLL_INTERVAL_MS = 1000
+const GATEWAY_POLL_INTERVAL_MS = 10000
+const GATEWAY_TRANSIENT_POLL_INTERVAL_MS = 2000
 const GATEWAY_STOPPING_TIMEOUT_MS = 5000
 
 interface RefreshGatewayStateOptions {
