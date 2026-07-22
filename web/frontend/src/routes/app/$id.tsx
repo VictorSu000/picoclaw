@@ -53,7 +53,7 @@ function ExternalAppPage() {
         className="flex-1 w-full border-0 bg-background"
         onLoad={handleIframeLoad}
         onError={handleIframeError}
-        sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-presentation"
+        sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-presentation allow-downloads"
       />
     </div>
   )

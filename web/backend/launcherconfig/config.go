@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,12 +21,11 @@ const (
 
 // ExternalApp defines an external application to be served via the launcher.
 type ExternalApp struct {
-	ID         string `json:"id"`             // Unique identifier for the app
-	Name       string `json:"name"`           // Display name for sidebar menu
-	BasePath   string `json:"base_path"`      // OS path to the frontend files
-	BackendURL string `json:"backend_url"`    // URL of the app's independent backend
-	ProxyPath  string `json:"proxy_path"`     // Proxy route prefix (e.g. /api/external/myapp)
-	Icon       string `json:"icon,omitempty"` // Optional: icon identifier for menu
+	ID         string `json:"id"`                    // Unique identifier for the app
+	Name       string `json:"name"`                  // Display name for sidebar menu
+	BasePath   string `json:"base_path,omitempty"`   // OS path to a split app's frontend files
+	BackendURL string `json:"backend_url,omitempty"` // URL of a split app's backend
+	ServiceURL string `json:"service_url,omitempty"` // URL of an integrated frontend/backend service
 }
 
 // Config stores launch parameters for the web backend service.
@@ -73,22 +73,80 @@ func Validate(cfg Config) error {
 			return fmt.Errorf("invalid trusted proxy CIDR %q", cidr)
 		}
 	}
+	seenAppIDs := make(map[string]struct{}, len(cfg.ExternalApps))
 	for _, app := range cfg.ExternalApps {
 		if strings.TrimSpace(app.ID) == "" {
 			return fmt.Errorf("external app: id cannot be empty")
 		}
+		if !validExternalAppID(app.ID) {
+			return fmt.Errorf("external app %q: id must contain only letters, digits, '.', '_' or '-'", app.ID)
+		}
+		if _, exists := seenAppIDs[app.ID]; exists {
+			return fmt.Errorf("external app %q: duplicate id", app.ID)
+		}
+		seenAppIDs[app.ID] = struct{}{}
 		if strings.TrimSpace(app.Name) == "" {
 			return fmt.Errorf("external app %q: name cannot be empty", app.ID)
 		}
-		if strings.TrimSpace(app.BasePath) == "" {
+
+		basePath := strings.TrimSpace(app.BasePath)
+		backendURL := strings.TrimSpace(app.BackendURL)
+		serviceURL := strings.TrimSpace(app.ServiceURL)
+		if serviceURL != "" {
+			if basePath != "" || backendURL != "" {
+				return fmt.Errorf(
+					"external app %q: service_url cannot be combined with base_path or backend_url",
+					app.ID,
+				)
+			}
+			if err := validateExternalAppURL("service_url", serviceURL); err != nil {
+				return fmt.Errorf("external app %q: %w", app.ID, err)
+			}
+			continue
+		}
+
+		if basePath == "" {
 			return fmt.Errorf("external app %q: base_path cannot be empty", app.ID)
 		}
-		if strings.TrimSpace(app.BackendURL) == "" {
+		if backendURL == "" {
 			return fmt.Errorf("external app %q: backend_url cannot be empty", app.ID)
 		}
-		if strings.TrimSpace(app.ProxyPath) == "" {
-			return fmt.Errorf("external app %q: proxy_path cannot be empty", app.ID)
+		if err := validateExternalAppURL("backend_url", backendURL); err != nil {
+			return fmt.Errorf("external app %q: %w", app.ID, err)
 		}
+	}
+	return nil
+}
+
+func validExternalAppID(id string) bool {
+	if id == "." || id == ".." {
+		return false
+	}
+	for _, r := range id {
+		if (r >= 'a' && r <= 'z') ||
+			(r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') ||
+			r == '.' || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return id != ""
+}
+
+func validateExternalAppURL(field, rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid %s: %w", field, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("%s scheme must be http or https", field)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("%s must have a host", field)
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("%s must not contain a query or fragment", field)
 	}
 	return nil
 }

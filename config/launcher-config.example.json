@@ -7,17 +7,18 @@
       "id": "analytics",
       "name": "数据分析",
       "base_path": "/opt/analytics/web",
-      "backend_url": "http://localhost:8888",
-      "proxy_path": "/api/external/analytics",
-      "icon": "chart"
+      "backend_url": "http://localhost:8888"
     },
     {
       "id": "dashboard",
       "name": "仪表板",
       "base_path": "/opt/dashboard/web",
-      "backend_url": "http://localhost:8889",
-      "proxy_path": "/api/external/dashboard",
-      "icon": "gauge"
+      "backend_url": "http://localhost:8889"
+    },
+    {
+      "id": "admin-console",
+      "name": "管理控制台",
+      "service_url": "http://localhost:9000"
     }
   ]
 }

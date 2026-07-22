@@ -34,7 +34,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import { useSidebarChannels } from "@/hooks/use-sidebar-channels"
-import { getExternalApps } from "@/api/external-apps"
+import { getExternalApps, type ExternalApp } from "@/api/external-apps"
 
 interface NavItem {
   title: string
@@ -48,12 +48,6 @@ interface NavGroup {
   defaultOpen: boolean
   items: NavItem[]
   isChannelsGroup?: boolean
-}
-
-interface ExternalApp {
-  id: string
-  name: string
-  icon?: string
 }
 
 const baseNavGroups: Omit<NavGroup, "items">[] = [
@@ -109,15 +103,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       setOpenMobile(false)
     }
   }, [isMobile, setOpenMobile])
-
-  const getIconForApp = (iconName?: string) => {
-    // Use the provided iconName to allow future mapping and avoid unused-parameter errors
-    if (iconName) {
-      // placeholder for future mapping logic, currently default to IconApps
-      // e.g. if (iconName === 'apps') return IconApps
-    }
-    return IconApps
-  }
 
   const navGroups: NavGroup[] = React.useMemo(() => {
     const groups: NavGroup[] = [
@@ -210,7 +195,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         items: externalApps.map((app) => ({
           title: app.name,
           url: `/app/${app.id}`,
-          icon: getIconForApp(app.icon),
+          icon: IconApps,
           translateTitle: false,
         })),
       })

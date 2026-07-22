@@ -12,6 +12,7 @@ It is not just a frontend: it is a small launcher service that bundles a React d
 - A launcher process that can auto-open the browser, show a system tray menu, and persist launcher-specific settings.
 - A controlled way to start, stop, restart, and inspect the `picoclaw gateway` subprocess.
 - A single-binary deployment target where the frontend is embedded into the Go backend.
+- Optional `external_apps` integrations for mounting trusted split or integrated services in the dashboard.
 
 ## Architecture
 
@@ -83,6 +84,7 @@ That file currently stores:
 - `allowed_cidrs`
 - `allow_localhost_bypass`
 - `trusted_proxy_cidrs`
+- `external_apps`
 
 If `-port` or `-public` are passed explicitly, the CLI flag wins for that run.
 If they are omitted, stored launcher settings are used.
@@ -158,6 +160,45 @@ When public access is enabled:
 - optional `trusted_proxy_cidrs` can trust specific reverse proxies to supply the original client IP through headers such as `X-Forwarded-For`
 - trusted proxy deployments should overwrite or sanitize forwarding headers such as `X-Forwarded-For` and `X-Real-IP` instead of passing through user-supplied values
 - the gateway host is overridden so remote clients can still use the launcher-managed proxy paths
+
+### External applications
+
+External applications are configured in `launcher-config.json`, next to the main `config.json`. The launcher lists each application in the WebUI sidebar with a common application icon and opens it in an iframe. Only `id` and `name` are exposed to the browser; upstream addresses stay server-side.
+
+For a split deployment, provide `base_path` and `backend_url`:
+
+```json
+{
+  "external_apps": [
+    {
+      "id": "analytics",
+      "name": "Analytics",
+      "base_path": "/opt/analytics/web",
+      "backend_url": "http://127.0.0.1:8888"
+    }
+  ]
+}
+```
+
+The static frontend is available at `/_external-app/analytics/`. Backend HTTP and WebSocket requests use `/api/external/analytics/`; the launcher strips that prefix before contacting `backend_url`.
+
+For a service that serves its frontend and backend from one address, provide `service_url` instead:
+
+```json
+{
+  "external_apps": [
+    {
+      "id": "admin-console",
+      "name": "Admin Console",
+      "service_url": "http://127.0.0.1:9000"
+    }
+  ]
+}
+```
+
+Every request under `/_external-app/admin-console/` is proxied, including WebSocket upgrades. The integrated service must support a URL prefix, use relative URLs, or honor `X-Forwarded-Prefix`. Hard-coded root URLs such as `/api`, `/assets`, or `/ws` will escape the application mount and cannot be routed reliably. Upstream URLs must use `http` or `https`; frontend code should derive `ws` or `wss` from the current page protocol. The upstream must also allow the launcher origin and iframe embedding when it validates Origin, `X-Frame-Options`, or CSP.
+
+`proxy_path` is obsolete and is ignored for compatibility. Public proxy paths are derived from the application ID.
 
 ## Build And Run
 

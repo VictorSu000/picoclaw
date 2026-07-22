@@ -217,6 +217,73 @@ PicoClaw 将数据存储在您配置的工作区中（默认：`~/.picoclaw/work
 - **暴力尝试**：`POST /api/auth/login` 对同一远程地址有 **每分钟尝试次数上限**（超限返回 HTTP 429）。
 - **会话时长**：登录后的 HttpOnly 会话 Cookie 默认约 **31 天**有效，但 launcher 进程重启后已有会话会失效。
 
+### 外部应用（external_apps）
+
+启动器可以把可信的第三方服务添加到 WebUI 侧边栏。配置写在 `launcher-config.json` 中，位置与主 `config.json` 相同；如果设置了 `PICOCLAW_CONFIG`，则位于该文件所在目录。保存配置并刷新 WebUI 后，每个应用会出现在“应用”分组中，并通过 iframe 打开 `/_external-app/{id}/`。
+
+每个应用只能选择下面两种部署方式之一。
+
+应用 ID 只能包含 ASCII 字母、数字、`.`、`_` 和 `-`，并且不能重复。所有外部应用在侧边栏中统一使用应用图标。
+
+#### 前后端分离
+
+使用 `base_path` 指向前端构建产物目录，使用 `backend_url` 指向独立的 HTTP 后端：
+
+```json
+{
+  "external_apps": [
+    {
+      "id": "analytics",
+      "name": "数据分析",
+      "base_path": "/opt/analytics/web",
+      "backend_url": "http://127.0.0.1:8888"
+    }
+  ]
+}
+```
+
+前端页面地址为 `/_external-app/analytics/`。前端发往后端的请求必须使用 `/api/external/analytics/` 前缀，例如：
+
+```text
+GET  /api/external/analytics/api/reports
+POST /api/external/analytics/api/reports
+WS   ws(s)://<launcher-host>/api/external/analytics/ws
+```
+
+启动器转发前会去掉公开前缀，因此上游后端实际收到的是 `/api/reports` 和 `/ws`。`backend_url` 可以自带基础路径，例如 `http://127.0.0.1:8888/app`。
+
+#### 前后端一体、只提供一个访问地址
+
+如果服务自身同时提供前端和后端，只需配置 `service_url`：
+
+```json
+{
+  "external_apps": [
+    {
+      "id": "admin-console",
+      "name": "管理控制台",
+      "service_url": "http://127.0.0.1:9000"
+    }
+  ]
+}
+```
+
+`/_external-app/admin-console/` 下的所有请求都会转发到该服务，包括 HTML、静态资源、API、流式响应和 WebSocket：
+
+```text
+GET /_external-app/admin-console/
+GET /_external-app/admin-console/assets/app.js
+WS  ws(s)://<launcher-host>/_external-app/admin-console/ws
+```
+
+服务必须支持部署在 URL 子路径下。前端应优先使用相对 URL，或者把服务的 base path 配置为 `/_external-app/admin-console`。启动器会发送 `X-Forwarded-Prefix` 以及标准的 `X-Forwarded-*` 请求头。如果服务把 `/assets/app.js`、`/api` 或 `/ws` 写死为根路径，浏览器会请求 PicoClaw 根路径，启动器无法可靠地把这些请求归属到该应用。
+
+上游地址只允许使用 `http://` 或 `https://`。前端代码应根据 `window.location.protocol` 选择 `ws://` 或 `wss://`，不需要另配上游 WebSocket 地址。如果上游校验 Origin，需要允许 launcher 的访问来源；如果上游返回限制 iframe 的 `X-Frame-Options` 或 CSP，也需要由上游服务调整。
+
+`proxy_path` 已删除，不再是支持的配置项。公开路由由应用 ID 自动生成，如上文所示。旧配置中残留的 `proxy_path` 会被忽略，并在下一次保存 launcher 配置时移除。
+
+浏览器只会收到应用 ID 和显示名称，上游地址只在服务端使用。外部应用属于与 WebUI 同源的可信内容，应按可执行代码对其进行管理和部署。
+
 ### 技能来源 (Skill Sources)
 
 默认情况下，技能会按以下顺序加载：

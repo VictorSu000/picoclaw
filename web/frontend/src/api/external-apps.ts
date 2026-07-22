@@ -3,7 +3,6 @@ import { launcherFetch } from "./http"
 export interface ExternalApp {
   id: string
   name: string
-  icon?: string
 }
 
 /**

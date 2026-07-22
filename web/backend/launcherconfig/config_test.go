@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -201,6 +202,121 @@ func TestValidateRejectsInvalidTrustedProxyCIDR(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("Validate() expected error for invalid trusted proxy CIDR")
+	}
+}
+
+func TestValidateExternalApps(t *testing.T) {
+	tests := []struct {
+		name    string
+		apps    []ExternalApp
+		wantErr string
+	}{
+		{
+			name: "split app",
+			apps: []ExternalApp{{
+				ID:         "analytics",
+				Name:       "Analytics",
+				BasePath:   "/opt/analytics/web",
+				BackendURL: "http://127.0.0.1:8888/api",
+			}},
+		},
+		{
+			name: "integrated app",
+			apps: []ExternalApp{{
+				ID:         "service.console",
+				Name:       "Service Console",
+				ServiceURL: "https://service.internal/base",
+			}},
+		},
+		{
+			name: "mixed modes",
+			apps: []ExternalApp{{
+				ID:         "mixed",
+				Name:       "Mixed",
+				BasePath:   "/opt/mixed/web",
+				ServiceURL: "http://127.0.0.1:9000",
+			}},
+			wantErr: "service_url cannot be combined",
+		},
+		{
+			name: "invalid backend scheme",
+			apps: []ExternalApp{{
+				ID:         "invalid-url",
+				Name:       "Invalid URL",
+				BasePath:   "/opt/invalid/web",
+				BackendURL: "ws://127.0.0.1:9000",
+			}},
+			wantErr: "backend_url scheme must be http or https",
+		},
+		{
+			name: "invalid id",
+			apps: []ExternalApp{{
+				ID:         "invalid/id",
+				Name:       "Invalid ID",
+				ServiceURL: "http://127.0.0.1:9000",
+			}},
+			wantErr: "id must contain only",
+		},
+		{
+			name: "duplicate id",
+			apps: []ExternalApp{
+				{ID: "same", Name: "First", ServiceURL: "http://127.0.0.1:9000"},
+				{ID: "same", Name: "Second", ServiceURL: "http://127.0.0.1:9001"},
+			},
+			wantErr: "duplicate id",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Default()
+			cfg.ExternalApps = tt.apps
+			err := Validate(cfg)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate() error = %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Validate() error = %v, want error containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestSaveDropsRemovedExternalAppFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "launcher-config.json")
+	legacy := `{
+  "port": 18800,
+  "external_apps": [{
+    "id": "analytics",
+    "name": "Analytics",
+    "base_path": "/opt/analytics/web",
+    "backend_url": "http://127.0.0.1:8888",
+    "proxy_path": "/api/external/analytics",
+    "icon": "chart"
+  }]
+}`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cfg, err := Load(path, Default())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if err := Save(path, cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	for _, removedField := range []string{"proxy_path", "icon"} {
+		if strings.Contains(string(saved), removedField) {
+			t.Fatalf("saved config still contains %s: %s", removedField, saved)
+		}
 	}
 }
 

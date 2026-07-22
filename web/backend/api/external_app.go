@@ -3,41 +3,40 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/web/backend/launcherconfig"
+	"github.com/sipeed/picoclaw/web/backend/middleware"
+)
+
+const (
+	externalAppFrontendPrefix = "/_external-app/"
+	externalAppBackendPrefix  = "/api/external/"
 )
 
 // ExternalAppInfo represents public info about an external app for the frontend.
 type ExternalAppInfo struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
-	Icon string `json:"icon,omitempty"`
 }
 
-// registerExternalAppRoutes registers routes for external app management and proxying.
+// registerExternalAppRoutes registers routes for external app discovery and proxying.
 func (h *Handler) registerExternalAppRoutes(mux *http.ServeMux) {
-	// Get list of external apps (public endpoint)
-	mux.HandleFunc("/api/launcher/external-apps", h.handleGetExternalApps)
-
-	// Serve static files from external app base paths (prefix)
-	mux.HandleFunc("/_external-app/", h.handleExternalAppStaticFiles)
-
-	// Proxy requests to external apps (prefix)
-	mux.HandleFunc("/api/external/", h.handleExternalAppProxy)
+	mux.HandleFunc("GET /api/launcher/external-apps", h.handleGetExternalApps)
+	mux.HandleFunc(externalAppFrontendPrefix, h.handleExternalAppFrontend)
+	mux.HandleFunc(externalAppBackendPrefix, h.handleExternalAppBackend)
 }
 
-// handleGetExternalApps returns the list of configured external applications.
-// Only returns basic info (id, name, icon) without sensitive backend URLs.
-func (h *Handler) handleGetExternalApps(w http.ResponseWriter, r *http.Request) {
-	launcherCfgPath := launcherconfig.PathForAppConfig(h.configPath)
-	cfg, err := launcherconfig.Load(launcherCfgPath, launcherconfig.Default())
+// handleGetExternalApps returns the configured applications without exposing upstream URLs.
+func (h *Handler) handleGetExternalApps(w http.ResponseWriter, _ *http.Request) {
+	cfg, err := h.loadLauncherConfig()
 	if err != nil {
 		logger.ErrorC("api", fmt.Sprintf("Failed to load launcher config: %v", err))
 		http.Error(w, "Failed to load config", http.StatusInternalServerError)
@@ -49,73 +48,122 @@ func (h *Handler) handleGetExternalApps(w http.ResponseWriter, r *http.Request) 
 		apps[i] = ExternalAppInfo{
 			ID:   app.ID,
 			Name: app.Name,
-			Icon: app.Icon,
 		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(apps)
+	_ = json.NewEncoder(w).Encode(apps)
 }
 
-// handleExternalAppStaticFiles serves static files from the external app's base path.
-// Path format: /_external-app/{appId}/* -> {basePath}/{remaining path}
-func (h *Handler) handleExternalAppStaticFiles(w http.ResponseWriter, r *http.Request) {
-	// Expected path: /_external-app/{appId}/*
-	// Extract appId and suffix from URL path since plain ServeMux does not
-	// support templated patterns.
-	trimmed := strings.TrimPrefix(r.URL.Path, "/_external-app/")
-	// trimmed may be "" or "{appId}" or "{appId}/rest/of/path"
-	var appID, pathSuffix string
-	if trimmed == "" {
+// handleExternalAppFrontend serves a split app's static files or proxies an
+// integrated app at /_external-app/{appID}/.
+func (h *Handler) handleExternalAppFrontend(w http.ResponseWriter, r *http.Request) {
+	appID, pathSuffix, ok := splitExternalAppPath(r.URL.Path, externalAppFrontendPrefix)
+	if !ok {
 		http.Error(w, "missing app id", http.StatusBadRequest)
 		return
 	}
-	parts := strings.SplitN(trimmed, "/", 2)
-	appID = parts[0]
-	if len(parts) == 2 {
-		pathSuffix = parts[1]
-	} else {
-		pathSuffix = ""
+
+	app, ok := h.findExternalApp(w, appID)
+	if !ok {
+		return
 	}
 
-	// Load config to find app settings
-	launcherCfgPath := launcherconfig.PathForAppConfig(h.configPath)
-	cfg, err := launcherconfig.Load(launcherCfgPath, launcherconfig.Default())
+	if strings.TrimSpace(app.ServiceURL) != "" {
+		h.proxyExternalApp(
+			w,
+			r,
+			app.ServiceURL,
+			pathSuffix,
+			externalAppMountPath(externalAppFrontendPrefix, appID),
+			true,
+		)
+		return
+	}
+
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	h.serveExternalAppStaticFile(w, r, app, pathSuffix)
+}
+
+// handleExternalAppBackend proxies a split app's backend at /api/external/{appID}/.
+func (h *Handler) handleExternalAppBackend(w http.ResponseWriter, r *http.Request) {
+	appID, pathSuffix, ok := splitExternalAppPath(r.URL.Path, externalAppBackendPrefix)
+	if !ok {
+		http.Error(w, "missing app id", http.StatusBadRequest)
+		return
+	}
+
+	app, ok := h.findExternalApp(w, appID)
+	if !ok {
+		return
+	}
+	if strings.TrimSpace(app.ServiceURL) != "" {
+		http.Error(w, "External app backend proxy not found", http.StatusNotFound)
+		return
+	}
+
+	h.proxyExternalApp(
+		w,
+		r,
+		app.BackendURL,
+		pathSuffix,
+		externalAppMountPath(externalAppBackendPrefix, appID),
+		false,
+	)
+}
+
+func splitExternalAppPath(requestPath, prefix string) (appID, pathSuffix string, ok bool) {
+	trimmed := strings.TrimPrefix(requestPath, prefix)
+	if trimmed == requestPath || trimmed == "" {
+		return "", "", false
+	}
+	parts := strings.SplitN(trimmed, "/", 2)
+	if parts[0] == "" {
+		return "", "", false
+	}
+	if len(parts) == 1 || parts[1] == "" {
+		return parts[0], "/", true
+	}
+	return parts[0], "/" + strings.TrimLeft(parts[1], "/"), true
+}
+
+func externalAppMountPath(prefix, appID string) string {
+	return strings.TrimRight(prefix, "/") + "/" + appID
+}
+
+func (h *Handler) findExternalApp(w http.ResponseWriter, appID string) (launcherconfig.ExternalApp, bool) {
+	cfg, err := h.loadLauncherConfig()
 	if err != nil {
 		logger.ErrorC("api", fmt.Sprintf("Failed to load launcher config: %v", err))
 		http.Error(w, "Failed to load config", http.StatusInternalServerError)
-		return
+		return launcherconfig.ExternalApp{}, false
 	}
-
-	// Find the app config
-	var appCfg launcherconfig.ExternalApp
-	found := false
 	for _, app := range cfg.ExternalApps {
 		if app.ID == appID {
-			appCfg = app
-			found = true
-			break
+			return app, true
 		}
 	}
+	http.Error(w, "External app not found", http.StatusNotFound)
+	return launcherconfig.ExternalApp{}, false
+}
 
-	if !found {
-		http.Error(w, "External app not found", http.StatusNotFound)
-		return
-	}
-
-	// Validate and resolve the requested path
-	basePath := strings.TrimSpace(appCfg.BasePath)
-	requestedPath := "/" + strings.TrimLeft(pathSuffix, "/")
-
-	// Prevent directory traversal
-	fullPath, err := ValidateExternalAppPath(basePath, requestedPath)
+func (h *Handler) serveExternalAppStaticFile(
+	w http.ResponseWriter,
+	r *http.Request,
+	app launcherconfig.ExternalApp,
+	pathSuffix string,
+) {
+	fullPath, err := ValidateExternalAppPath(strings.TrimSpace(app.BasePath), pathSuffix)
 	if err != nil {
-		logger.ErrorC("api", fmt.Sprintf("Path validation failed for app %s: %v", appID, err))
+		logger.ErrorC("api", fmt.Sprintf("Path validation failed for app %s: %v", app.ID, err))
 		http.Error(w, "Invalid path", http.StatusBadRequest)
 		return
 	}
 
-	// Handle directory requests
 	info, err := os.Stat(fullPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -125,175 +173,175 @@ func (h *Handler) handleExternalAppStaticFiles(w http.ResponseWriter, r *http.Re
 		}
 		return
 	}
-
 	if info.IsDir() {
-		// If it's a directory, try to serve index.html
 		indexPath := filepath.Join(fullPath, "index.html")
-		indexInfo, err := os.Stat(indexPath)
-		if err != nil || indexInfo.IsDir() {
+		indexInfo, statErr := os.Stat(indexPath)
+		if statErr != nil || indexInfo.IsDir() {
 			http.Error(w, "Directory listing not allowed", http.StatusForbidden)
 			return
 		}
 		fullPath = indexPath
 	}
 
-	// Serve the file
 	http.ServeFile(w, r, fullPath)
 }
 
-// handleExternalAppProxy proxies requests to the external app's backend.
-// Path format: /api/external/{appId}/* -> {backendURL}/{remaining path}
-func (h *Handler) handleExternalAppProxy(w http.ResponseWriter, r *http.Request) {
-	// Expected path: /api/external/{appId}/*
-	trimmed := strings.TrimPrefix(r.URL.Path, "/api/external/")
-	var appID, pathSuffix string
-	if trimmed == "" {
-		http.Error(w, "missing app id", http.StatusBadRequest)
-		return
-	}
-	parts := strings.SplitN(trimmed, "/", 2)
-	appID = parts[0]
-	if len(parts) == 2 {
-		pathSuffix = parts[1]
-	} else {
-		pathSuffix = ""
-	}
-
-	// Load config to find app settings
-	launcherCfgPath := launcherconfig.PathForAppConfig(h.configPath)
-	cfg, err := launcherconfig.Load(launcherCfgPath, launcherconfig.Default())
+func (h *Handler) proxyExternalApp(
+	w http.ResponseWriter,
+	r *http.Request,
+	rawTargetURL string,
+	pathSuffix string,
+	publicPrefix string,
+	scopeCookiesToPrefix bool,
+) {
+	target, err := parseExternalAppURL(rawTargetURL)
 	if err != nil {
-		logger.ErrorC("api", fmt.Sprintf("Failed to load launcher config: %v", err))
-		http.Error(w, "Failed to load config", http.StatusInternalServerError)
+		logger.ErrorC("api", fmt.Sprintf("Invalid external app target: %v", err))
+		http.Error(w, "Invalid external app configuration", http.StatusInternalServerError)
 		return
 	}
 
-	// Find the app config
-	var appCfg launcherconfig.ExternalApp
-	found := false
-	for _, app := range cfg.ExternalApps {
-		if app.ID == appID {
-			appCfg = app
-			found = true
-			break
-		}
+	proxy := &httputil.ReverseProxy{
+		Rewrite: func(proxyReq *httputil.ProxyRequest) {
+			proxyReq.Out.URL.Path = pathSuffix
+			proxyReq.Out.URL.RawPath = ""
+			proxyReq.SetURL(target)
+			proxyReq.SetXForwarded()
+			proxyReq.Out.Header.Set("X-Forwarded-Prefix", publicPrefix)
+			removeLauncherAuthCookie(proxyReq.Out)
+		},
+		ModifyResponse: func(resp *http.Response) error {
+			rewriteExternalAppLocation(resp, target, publicPrefix)
+			rewriteExternalAppCookies(resp, target, publicPrefix, scopeCookiesToPrefix)
+			return nil
+		},
+		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, proxyErr error) {
+			logger.ErrorC("api", fmt.Sprintf("Failed to proxy external app: %v", proxyErr))
+			http.Error(w, "External app unavailable", http.StatusBadGateway)
+		},
+		FlushInterval: -1 * time.Second,
 	}
-
-	if !found {
-		http.Error(w, "External app not found", http.StatusNotFound)
-		return
-	}
-
-	// Build target URL
-	backendURL := strings.TrimRight(appCfg.BackendURL, "/")
-	targetPath := "/" + strings.TrimLeft(pathSuffix, "/")
-	targetURL := backendURL + targetPath
-
-	// Parse and preserve query parameters
-	if r.URL.RawQuery != "" {
-		targetURL += "?" + r.URL.RawQuery
-	}
-
-	// Create proxy request
-	proxyReq, err := http.NewRequest(r.Method, targetURL, r.Body)
-	if err != nil {
-		logger.ErrorC("api", fmt.Sprintf("Failed to create proxy request: %v", err))
-		http.Error(w, "Failed to create proxy request", http.StatusInternalServerError)
-		return
-	}
-
-	// Copy relevant headers from original request
-	copyProxyHeaders(r.Header, proxyReq.Header)
-
-	// Execute proxy request
-	client := &http.Client{Timeout: 0} // Use default timeout
-	resp, err := client.Do(proxyReq)
-	if err != nil {
-		logger.ErrorC("api", fmt.Sprintf("Failed to proxy request to %s: %v", targetURL, err))
-		http.Error(w, fmt.Sprintf("Failed to connect to external app: %v", err), http.StatusBadGateway)
-		return
-	}
-	defer resp.Body.Close()
-
-	// Copy response status and headers
-	for key, values := range resp.Header {
-		for _, value := range values {
-			w.Header().Add(key, value)
-		}
-	}
-
-	// Add CORS headers for iframe access
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-
-	w.WriteHeader(resp.StatusCode)
-
-	// Copy response body
-	if _, err := io.Copy(w, resp.Body); err != nil {
-		logger.ErrorC("api", fmt.Sprintf("Failed to copy response body: %v", err))
-	}
+	proxy.ServeHTTP(w, r)
 }
 
-// copyProxyHeaders copies request headers for proxying, excluding sensitive headers.
-func copyProxyHeaders(src http.Header, dst http.Header) {
-	// List of headers NOT to proxy
-	excludeHeaders := map[string]bool{
-		"host":                     true,
-		"connection":               true,
-		"keep-alive":               true,
-		"proxy-authenticate":       true,
-		"proxy-authorization":      true,
-		"te":                       true,
-		"trailers":                 true,
-		"transfer-encoding":        true,
-		"upgrade":                  true,
-		"content-length":           true, // Handled by http.Client
-		"x-forwarded-for":          true,
-		"x-forwarded-proto":        true,
-		"x-forwarded-host":         true,
-		"x-original-forwarded-for": true,
-	}
-
-	for key, values := range src {
-		keyLower := strings.ToLower(key)
-		if !excludeHeaders[keyLower] {
-			for _, value := range values {
-				dst.Add(key, value)
-			}
+func removeLauncherAuthCookie(r *http.Request) {
+	cookies := r.Cookies()
+	r.Header.Del("Cookie")
+	for _, cookie := range cookies {
+		if cookie.Name != middleware.LauncherDashboardCookieName {
+			r.AddCookie(cookie)
 		}
 	}
 }
 
-// ValidateExternalAppPath checks if the given path is safe (no directory traversal).
+func rewriteExternalAppLocation(resp *http.Response, target *url.URL, publicPrefix string) {
+	rawLocation := resp.Header.Get("Location")
+	if rawLocation == "" {
+		return
+	}
+	location, err := url.Parse(rawLocation)
+	if err != nil {
+		return
+	}
+
+	if location.IsAbs() || location.Host != "" {
+		if !strings.EqualFold(location.Host, target.Host) {
+			return
+		}
+		if location.Scheme != "" && !strings.EqualFold(location.Scheme, target.Scheme) {
+			return
+		}
+		location.Scheme = ""
+		location.Host = ""
+	} else if !strings.HasPrefix(location.Path, "/") {
+		return
+	}
+
+	location.Path = joinExternalAppPath(publicPrefix, stripExternalAppTargetPath(location.Path, target.Path))
+	location.RawPath = ""
+	resp.Header.Set("Location", location.String())
+}
+
+func rewriteExternalAppCookies(
+	resp *http.Response,
+	target *url.URL,
+	publicPrefix string,
+	scopeToPrefix bool,
+) {
+	cookies := resp.Cookies()
+	if len(cookies) == 0 {
+		return
+	}
+	resp.Header.Del("Set-Cookie")
+	for _, cookie := range cookies {
+		if cookie.Name == middleware.LauncherDashboardCookieName {
+			continue
+		}
+		cookie.Domain = ""
+		if scopeToPrefix {
+			cookie.Path = joinExternalAppPath(
+				publicPrefix,
+				stripExternalAppTargetPath(cookie.Path, target.Path),
+			)
+		} else {
+			// Split apps use separate frontend and API prefixes, so a narrower
+			// cookie path would make non-HttpOnly CSRF cookies invisible to the UI.
+			cookie.Path = "/"
+		}
+		resp.Header.Add("Set-Cookie", cookie.String())
+	}
+}
+
+func stripExternalAppTargetPath(upstreamPath, targetBasePath string) string {
+	if upstreamPath == "" {
+		return "/"
+	}
+	basePath := strings.TrimRight(targetBasePath, "/")
+	if basePath == "" {
+		return upstreamPath
+	}
+	if upstreamPath == basePath {
+		return "/"
+	}
+	if strings.HasPrefix(upstreamPath, basePath+"/") {
+		return strings.TrimPrefix(upstreamPath, basePath)
+	}
+	return upstreamPath
+}
+
+func joinExternalAppPath(prefix, suffix string) string {
+	prefix = strings.TrimRight(prefix, "/")
+	if suffix == "" || suffix == "/" {
+		return prefix + "/"
+	}
+	return prefix + "/" + strings.TrimLeft(suffix, "/")
+}
+
+// ValidateExternalAppPath checks that a static file request stays inside basePath.
 func ValidateExternalAppPath(basePath, requestedPath string) (string, error) {
-	// Clean the paths
 	cleanBase := filepath.Clean(basePath)
-	fullPath := filepath.Join(cleanBase, requestedPath)
-	cleanPath := filepath.Clean(fullPath)
-
-	// Ensure the resolved path is within the base path
-	if !strings.HasPrefix(cleanPath, cleanBase) {
+	requestedPath = strings.TrimLeft(requestedPath, `/\`)
+	cleanPath := filepath.Clean(filepath.Join(cleanBase, requestedPath))
+	relativePath, err := filepath.Rel(cleanBase, cleanPath)
+	if err != nil || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("path traversal detected")
 	}
-
 	return cleanPath, nil
 }
 
-// parseBackendURL validates and parses a backend URL.
-func parseBackendURL(urlStr string) (*url.URL, error) {
-	u, err := url.Parse(urlStr)
+func parseExternalAppURL(rawURL string) (*url.URL, error) {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
-		return nil, fmt.Errorf("invalid backend URL: %w", err)
+		return nil, fmt.Errorf("invalid URL: %w", err)
 	}
-
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return nil, fmt.Errorf("backend URL scheme must be http or https")
+		return nil, fmt.Errorf("URL scheme must be http or https")
 	}
-
 	if u.Host == "" {
-		return nil, fmt.Errorf("backend URL must have a host")
+		return nil, fmt.Errorf("URL must have a host")
 	}
-
+	if u.RawQuery != "" || u.Fragment != "" {
+		return nil, fmt.Errorf("URL must not contain a query or fragment")
+	}
 	return u, nil
 }

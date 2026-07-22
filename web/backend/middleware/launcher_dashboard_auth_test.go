@@ -253,14 +253,18 @@ func TestLauncherDashboardAuth_WebSocketUnauthorizedDoesNotRedirect(t *testing.T
 	})
 	h := LauncherDashboardAuth(cfg, next)
 
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/pico/ws", nil)
-	h.ServeHTTP(rec, req)
+	for _, requestPath := range []string{"/pico/ws", "/api/external/demo/ws", "/_external-app/demo/ws"} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, requestPath, nil)
+		req.Header.Set("Connection", "keep-alive, Upgrade")
+		req.Header.Set("Upgrade", "websocket")
+		h.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
-	}
-	if got := rec.Header().Get("Location"); got != "" {
-		t.Fatalf("Location = %q, want empty", got)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%s: status = %d, want %d", requestPath, rec.Code, http.StatusUnauthorized)
+		}
+		if got := rec.Header().Get("Location"); got != "" {
+			t.Fatalf("%s: Location = %q, want empty", requestPath, got)
+		}
 	}
 }

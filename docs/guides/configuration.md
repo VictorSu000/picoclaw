@@ -219,6 +219,73 @@ Use presets in a conversation with:
 - **Brute-force**: **`POST /api/auth/login`** is **rate-limited per client IP per minute** (HTTP 429 when exceeded).
 - **Session lifetime**: The HttpOnly session cookie lasts about **31 days** by default, but sessions are invalidated when the launcher process restarts.
 
+### External applications
+
+The launcher can add trusted third-party applications to the WebUI sidebar. Configure them in `launcher-config.json`, stored beside the main `config.json` (or beside the file selected by `PICOCLAW_CONFIG`). After saving the file, refresh the WebUI. Each configured application appears under **应用** and opens in an iframe at `/_external-app/{id}/`.
+
+There are two supported deployment shapes. Use exactly one shape per application.
+
+Application IDs may contain ASCII letters, digits, `.`, `_`, and `-`, and must be unique. All external applications use the same application icon in the sidebar.
+
+#### Split frontend and backend
+
+Use `base_path` for the built frontend files and `backend_url` for the independent HTTP backend:
+
+```json
+{
+  "external_apps": [
+    {
+      "id": "analytics",
+      "name": "Analytics",
+      "base_path": "/opt/analytics/web",
+      "backend_url": "http://127.0.0.1:8888"
+    }
+  ]
+}
+```
+
+The frontend is served from `/_external-app/analytics/`. Backend requests must use `/api/external/analytics/`, for example:
+
+```text
+GET  /api/external/analytics/api/reports
+POST /api/external/analytics/api/reports
+WS   ws(s)://<launcher-host>/api/external/analytics/ws
+```
+
+The launcher removes the public prefix before forwarding, so these requests arrive at the backend as `/api/reports` and `/ws`. The backend URL may include a base path, such as `http://127.0.0.1:8888/app`.
+
+#### One service containing frontend and backend
+
+Use `service_url` when one service serves its own frontend and backend from one address:
+
+```json
+{
+  "external_apps": [
+    {
+      "id": "admin-console",
+      "name": "Admin Console",
+      "service_url": "http://127.0.0.1:9000"
+    }
+  ]
+}
+```
+
+All requests under `/_external-app/admin-console/` are reverse-proxied to that service. This includes HTML, static assets, API requests, streaming responses, and WebSocket upgrades:
+
+```text
+GET /_external-app/admin-console/
+GET /_external-app/admin-console/assets/app.js
+WS  ws(s)://<launcher-host>/_external-app/admin-console/ws
+```
+
+The service must work behind a URL prefix. Prefer relative URLs in the frontend, or configure the service to use `/_external-app/admin-console` as its base path. The launcher sends `X-Forwarded-Prefix` and standard `X-Forwarded-*` headers. Absolute URLs such as `/assets/app.js`, `/api`, or `/ws` that ignore the prefix will request PicoClaw's root and cannot be routed to the application reliably.
+
+The launcher requires `http://` or `https://` upstream URLs. Frontend code should derive `ws://` or `wss://` from `window.location.protocol`; no separate upstream WebSocket URL is configured. The upstream service must accept the launcher origin if it performs Origin validation and must allow embedding if it sends restrictive `X-Frame-Options` or CSP headers.
+
+`proxy_path` is not a supported setting. The public routes are derived from the application ID as shown above. Legacy configurations containing `proxy_path` continue to load, but the field is ignored and is removed the next time launcher configuration is saved.
+
+Only the application ID and display name are sent to the browser. Upstream URLs remain server-side. External applications are trusted same-origin content and should be protected like other code running in the launcher dashboard.
+
 ### Skill Sources
 
 By default, skills are loaded from:
