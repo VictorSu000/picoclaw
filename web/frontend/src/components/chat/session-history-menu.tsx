@@ -435,6 +435,19 @@ function SessionHistoryItem({
               autoFocus
             />
           </div>
+        ) : swipeEnabled ? (
+          <div className="flex w-full min-w-0 items-center gap-1">
+            {session.is_favorited && (
+              <IconStar
+                aria-hidden="true"
+                className="size-3.5 shrink-0 text-amber-500"
+                fill="currentColor"
+              />
+            )}
+            <span className="line-clamp-1 min-w-0 text-sm font-medium">
+              {session.title}
+            </span>
+          </div>
         ) : (
           <span className="line-clamp-1 text-sm font-medium">
             {session.title}
