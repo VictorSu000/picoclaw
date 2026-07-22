@@ -180,7 +180,7 @@ For a split deployment, provide `base_path` and `backend_url`:
 }
 ```
 
-The static frontend is available at `/_external-app/analytics/`. Backend HTTP and WebSocket requests use `/api/external/analytics/`; the launcher strips that prefix before contacting `backend_url`.
+The static frontend is available at `/_external-app/analytics/`. Backend HTTP and WebSocket requests use `/api/external/analytics/`; by default the launcher strips that prefix before contacting `backend_url`. Set `preserve_prefix: true` when the backend expects the complete public prefix.
 
 For a service that serves its frontend and backend from one address, provide `service_url` instead:
 
@@ -190,13 +190,14 @@ For a service that serves its frontend and backend from one address, provide `se
     {
       "id": "admin-console",
       "name": "Admin Console",
-      "service_url": "http://127.0.0.1:9000"
+      "service_url": "http://127.0.0.1:9000",
+      "preserve_prefix": true
     }
   ]
 }
 ```
 
-Every request under `/_external-app/admin-console/` is proxied, including WebSocket upgrades. The integrated service must support a URL prefix, use relative URLs, or honor `X-Forwarded-Prefix`. Hard-coded root URLs such as `/api`, `/assets`, or `/ws` will escape the application mount and cannot be routed reliably. Upstream URLs must use `http` or `https`; frontend code should derive `ws` or `wss` from the current page protocol. The upstream must also allow the launcher origin and iframe embedding when it validates Origin, `X-Frame-Options`, or CSP.
+Every request under `/_external-app/admin-console/` is proxied, including WebSocket upgrades. With `preserve_prefix: true`, the integrated service receives the complete public prefix and can use it as its configured base path. With the default `false`, the prefix is stripped before forwarding. The service must use relative URLs, honor `X-Forwarded-Prefix`, or be configured consistently with the selected mode. Hard-coded root URLs such as `/api`, `/assets`, or `/ws` will escape the application mount and cannot be routed reliably. Upstream URLs must use `http` or `https`; frontend code should derive `ws` or `wss` from the current page protocol. The upstream must also allow the launcher origin and iframe embedding when it validates Origin, `X-Frame-Options`, or CSP.
 
 `proxy_path` is obsolete and is ignored for compatibility. Public proxy paths are derived from the application ID.
 

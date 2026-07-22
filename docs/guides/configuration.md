@@ -254,6 +254,8 @@ WS   ws(s)://<launcher-host>/api/external/analytics/ws
 
 The launcher removes the public prefix before forwarding, so these requests arrive at the backend as `/api/reports` and `/ws`. The backend URL may include a base path, such as `http://127.0.0.1:8888/app`.
 
+By default, `preserve_prefix` is `false`. Set it to `true` when the backend is configured to serve the application under its public prefix. For example, `/api/external/analytics/api/reports` is sent upstream with the same `/api/external/analytics/api/reports` path instead of `/api/reports`. In split mode this option affects only the backend proxy; the `/_external-app/analytics/` frontend is still served from `base_path`.
+
 #### One service containing frontend and backend
 
 Use `service_url` when one service serves its own frontend and backend from one address:
@@ -264,13 +266,14 @@ Use `service_url` when one service serves its own frontend and backend from one 
     {
       "id": "admin-console",
       "name": "Admin Console",
-      "service_url": "http://127.0.0.1:9000"
+      "service_url": "http://127.0.0.1:9000",
+      "preserve_prefix": true
     }
   ]
 }
 ```
 
-All requests under `/_external-app/admin-console/` are reverse-proxied to that service. This includes HTML, static assets, API requests, streaming responses, and WebSocket upgrades:
+All requests under `/_external-app/admin-console/` are reverse-proxied to that service. With `preserve_prefix: true`, the service receives the complete `/_external-app/admin-console/` prefix. This includes HTML, static assets, API requests, streaming responses, and WebSocket upgrades:
 
 ```text
 GET /_external-app/admin-console/
@@ -278,7 +281,7 @@ GET /_external-app/admin-console/assets/app.js
 WS  ws(s)://<launcher-host>/_external-app/admin-console/ws
 ```
 
-The service must work behind a URL prefix. Prefer relative URLs in the frontend, or configure the service to use `/_external-app/admin-console` as its base path. The launcher sends `X-Forwarded-Prefix` and standard `X-Forwarded-*` headers. Absolute URLs such as `/assets/app.js`, `/api`, or `/ws` that ignore the prefix will request PicoClaw's root and cannot be routed to the application reliably.
+If the service can be configured with `/_external-app/admin-console` as its base path, set `preserve_prefix` to `true` and it can keep using absolute URLs under that prefix. Otherwise leave it `false` and use relative URLs or another prefix-aware configuration. The launcher sends `X-Forwarded-Prefix` and standard `X-Forwarded-*` headers. Absolute URLs such as `/assets/app.js`, `/api`, or `/ws` that ignore the prefix will request PicoClaw's root and cannot be routed to the application reliably.
 
 The launcher requires `http://` or `https://` upstream URLs. Frontend code should derive `ws://` or `wss://` from `window.location.protocol`; no separate upstream WebSocket URL is configured. The upstream service must accept the launcher origin if it performs Origin validation and must allow embedding if it sends restrictive `X-Frame-Options` or CSP headers.
 

@@ -252,6 +252,8 @@ WS   ws(s)://<launcher-host>/api/external/analytics/ws
 
 启动器转发前会去掉公开前缀，因此上游后端实际收到的是 `/api/reports` 和 `/ws`。`backend_url` 可以自带基础路径，例如 `http://127.0.0.1:8888/app`。
 
+`preserve_prefix` 默认是 `false`。如果后端本身配置为在公开前缀下提供服务，可以将它设置为 `true`。例如，`/api/external/analytics/api/reports` 会以完整路径转发给上游，而不是被转换为 `/api/reports`。在前后端分离模式中，该选项只影响后端代理；`/_external-app/analytics/` 前端仍然从 `base_path` 提供静态文件。
+
 #### 前后端一体、只提供一个访问地址
 
 如果服务自身同时提供前端和后端，只需配置 `service_url`：
@@ -262,13 +264,14 @@ WS   ws(s)://<launcher-host>/api/external/analytics/ws
     {
       "id": "admin-console",
       "name": "管理控制台",
-      "service_url": "http://127.0.0.1:9000"
+      "service_url": "http://127.0.0.1:9000",
+      "preserve_prefix": true
     }
   ]
 }
 ```
 
-`/_external-app/admin-console/` 下的所有请求都会转发到该服务，包括 HTML、静态资源、API、流式响应和 WebSocket：
+`/_external-app/admin-console/` 下的所有请求都会转发到该服务。设置 `preserve_prefix: true` 后，上游会收到完整的 `/_external-app/admin-console/` 前缀，包括 HTML、静态资源、API、流式响应和 WebSocket：
 
 ```text
 GET /_external-app/admin-console/
@@ -276,7 +279,7 @@ GET /_external-app/admin-console/assets/app.js
 WS  ws(s)://<launcher-host>/_external-app/admin-console/ws
 ```
 
-服务必须支持部署在 URL 子路径下。前端应优先使用相对 URL，或者把服务的 base path 配置为 `/_external-app/admin-console`。启动器会发送 `X-Forwarded-Prefix` 以及标准的 `X-Forwarded-*` 请求头。如果服务把 `/assets/app.js`、`/api` 或 `/ws` 写死为根路径，浏览器会请求 PicoClaw 根路径，启动器无法可靠地把这些请求归属到该应用。
+如果服务可以把 base path 配置为 `/_external-app/admin-console`，可以设置 `preserve_prefix: true`，继续使用该前缀下的绝对 URL。否则保持 `false`，并使用相对 URL 或其他能识别前缀的配置。启动器会发送 `X-Forwarded-Prefix` 以及标准的 `X-Forwarded-*` 请求头。如果服务把 `/assets/app.js`、`/api` 或 `/ws` 写死为 PicoClaw 根路径，浏览器会请求 PicoClaw 根路径，启动器无法可靠地把这些请求归属到该应用。
 
 上游地址只允许使用 `http://` 或 `https://`。前端代码应根据 `window.location.protocol` 选择 `ws://` 或 `wss://`，不需要另配上游 WebSocket 地址。如果上游校验 Origin，需要允许 launcher 的访问来源；如果上游返回限制 iframe 的 `X-Frame-Options` 或 CSP，也需要由上游服务调整。
 

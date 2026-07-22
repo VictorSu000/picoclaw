@@ -18,7 +18,8 @@
     {
       "id": "admin-console",
       "name": "管理控制台",
-      "service_url": "http://localhost:9000"
+      "service_url": "http://localhost:9000",
+      "preserve_prefix": true
     }
   ]
 }

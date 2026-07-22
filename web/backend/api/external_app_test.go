@@ -126,25 +126,130 @@ func TestIntegratedExternalAppProxiesHTTPFromFrontendMount(t *testing.T) {
 	}
 }
 
-func TestExternalAppWebSocketProxySupportsSplitAndIntegratedApps(t *testing.T) {
+func TestExternalAppProxyCanPreservePublicPrefix(t *testing.T) {
 	tests := []struct {
-		name       string
-		publicPath string
-		configure  func(string) launcherconfig.ExternalApp
+		name                 string
+		publicPath           string
+		publicPrefix         string
+		wantUpstreamPath     string
+		scopeCookieToPrefix  bool
+		configureExternalApp func(string) launcherconfig.ExternalApp
 	}{
 		{
-			name:       "split",
-			publicPath: "/api/external/split/ws?channel=events",
-			configure: func(url string) launcherconfig.ExternalApp {
-				return launcherconfig.ExternalApp{ID: "split", Name: "Split", BasePath: t.TempDir(), BackendURL: url}
+			name:                "split backend",
+			publicPath:          "/api/external/split/api/reports?format=json",
+			publicPrefix:        "/api/external/split",
+			wantUpstreamPath:    "/base/api/external/split/api/reports",
+			scopeCookieToPrefix: false,
+			configureExternalApp: func(targetURL string) launcherconfig.ExternalApp {
+				return launcherconfig.ExternalApp{
+					ID:             "split",
+					Name:           "Split",
+					BasePath:       t.TempDir(),
+					BackendURL:     targetURL,
+					PreservePrefix: true,
+				}
 			},
 		},
 		{
-			name:       "integrated",
-			publicPath: "/_external-app/integrated/ws?channel=events",
-			configure: func(url string) launcherconfig.ExternalApp {
-				return launcherconfig.ExternalApp{ID: "integrated", Name: "Integrated", ServiceURL: url}
+			name:                "integrated service",
+			publicPath:          "/_external-app/console/api/reports?format=json",
+			publicPrefix:        "/_external-app/console",
+			wantUpstreamPath:    "/base/_external-app/console/api/reports",
+			scopeCookieToPrefix: true,
+			configureExternalApp: func(targetURL string) launcherconfig.ExternalApp {
+				return launcherconfig.ExternalApp{
+					ID:             "console",
+					Name:           "Console",
+					ServiceURL:     targetURL,
+					PreservePrefix: true,
+				}
 			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var upstream *httptest.Server
+			upstream = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != tt.wantUpstreamPath || r.URL.RawQuery != "format=json" {
+					t.Fatalf("upstream URL = %s, want %s?format=json", r.URL.RequestURI(), tt.wantUpstreamPath)
+				}
+				w.Header().Set("Location", upstream.URL+"/base"+tt.publicPrefix+"/login")
+				w.Header().Set("Set-Cookie", "external=session; Path=/base"+tt.publicPrefix+"; HttpOnly")
+				w.WriteHeader(http.StatusFound)
+			}))
+			defer upstream.Close()
+
+			configPath := filepath.Join(t.TempDir(), "config.json")
+			cfg := launcherconfig.Default()
+			cfg.ExternalApps = []launcherconfig.ExternalApp{
+				tt.configureExternalApp(upstream.URL + "/base"),
+			}
+			if err := launcherconfig.Save(launcherconfig.PathForAppConfig(configPath), cfg); err != nil {
+				t.Fatalf("Save() error = %v", err)
+			}
+
+			h := NewHandler(configPath)
+			mux := http.NewServeMux()
+			h.registerExternalAppRoutes(mux)
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tt.publicPath, nil))
+
+			if rec.Code != http.StatusFound {
+				t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusFound, rec.Body.String())
+			}
+			if got := rec.Header().Get("Location"); got != tt.publicPrefix+"/login" {
+				t.Fatalf("Location = %q, want %q", got, tt.publicPrefix+"/login")
+			}
+			cookies := rec.Result().Cookies()
+			wantCookiePath := "/"
+			if tt.scopeCookieToPrefix {
+				wantCookiePath = tt.publicPrefix
+			}
+			if len(cookies) != 1 || cookies[0].Path != wantCookiePath {
+				t.Fatalf("rewritten cookies = %#v, want path %q", cookies, wantCookiePath)
+			}
+		})
+	}
+}
+
+func TestExternalAppWebSocketProxySupportsSplitAndIntegratedApps(t *testing.T) {
+	tests := []struct {
+		name             string
+		appID            string
+		integrated       bool
+		preservePrefix   bool
+		publicPath       string
+		wantUpstreamPath string
+	}{
+		{
+			name:             "split strips prefix",
+			appID:            "split",
+			publicPath:       "/api/external/split/ws?channel=events",
+			wantUpstreamPath: "/ws",
+		},
+		{
+			name:             "split preserves prefix",
+			appID:            "split-preserved",
+			preservePrefix:   true,
+			publicPath:       "/api/external/split-preserved/ws?channel=events",
+			wantUpstreamPath: "/api/external/split-preserved/ws",
+		},
+		{
+			name:             "integrated strips prefix",
+			appID:            "integrated",
+			integrated:       true,
+			publicPath:       "/_external-app/integrated/ws?channel=events",
+			wantUpstreamPath: "/ws",
+		},
+		{
+			name:             "integrated preserves prefix",
+			appID:            "integrated-preserved",
+			integrated:       true,
+			preservePrefix:   true,
+			publicPath:       "/_external-app/integrated-preserved/ws?channel=events",
+			wantUpstreamPath: "/_external-app/integrated-preserved/ws",
 		},
 	}
 
@@ -152,7 +257,7 @@ func TestExternalAppWebSocketProxySupportsSplitAndIntegratedApps(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != "/ws" || r.URL.Query().Get("channel") != "events" {
+				if r.URL.Path != tt.wantUpstreamPath || r.URL.Query().Get("channel") != "events" {
 					http.Error(w, "unexpected upstream URL", http.StatusBadRequest)
 					return
 				}
@@ -170,7 +275,18 @@ func TestExternalAppWebSocketProxySupportsSplitAndIntegratedApps(t *testing.T) {
 
 			configPath := filepath.Join(t.TempDir(), "config.json")
 			cfg := launcherconfig.Default()
-			cfg.ExternalApps = []launcherconfig.ExternalApp{tt.configure(upstream.URL)}
+			app := launcherconfig.ExternalApp{
+				ID:             tt.appID,
+				Name:           tt.name,
+				PreservePrefix: tt.preservePrefix,
+			}
+			if tt.integrated {
+				app.ServiceURL = upstream.URL
+			} else {
+				app.BasePath = t.TempDir()
+				app.BackendURL = upstream.URL
+			}
+			cfg.ExternalApps = []launcherconfig.ExternalApp{app}
 			if err := launcherconfig.Save(launcherconfig.PathForAppConfig(configPath), cfg); err != nil {
 				t.Fatalf("Save() error = %v", err)
 			}

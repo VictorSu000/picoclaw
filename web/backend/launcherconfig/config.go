@@ -21,11 +21,12 @@ const (
 
 // ExternalApp defines an external application to be served via the launcher.
 type ExternalApp struct {
-	ID         string `json:"id"`                    // Unique identifier for the app
-	Name       string `json:"name"`                  // Display name for sidebar menu
-	BasePath   string `json:"base_path,omitempty"`   // OS path to a split app's frontend files
-	BackendURL string `json:"backend_url,omitempty"` // URL of a split app's backend
-	ServiceURL string `json:"service_url,omitempty"` // URL of an integrated frontend/backend service
+	ID             string `json:"id"`                        // Unique identifier for the app
+	Name           string `json:"name"`                      // Display name for sidebar menu
+	BasePath       string `json:"base_path,omitempty"`       // OS path to a split app's frontend files
+	BackendURL     string `json:"backend_url,omitempty"`     // URL of a split app's backend
+	ServiceURL     string `json:"service_url,omitempty"`     // URL of an integrated frontend/backend service
+	PreservePrefix bool   `json:"preserve_prefix,omitempty"` // Keep the public mount prefix in proxied paths
 }
 
 // Config stores launch parameters for the web backend service.

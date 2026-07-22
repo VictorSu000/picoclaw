@@ -73,10 +73,13 @@ func (h *Handler) handleExternalAppFrontend(w http.ResponseWriter, r *http.Reque
 		h.proxyExternalApp(
 			w,
 			r,
-			app.ServiceURL,
-			pathSuffix,
-			externalAppMountPath(externalAppFrontendPrefix, appID),
-			true,
+			externalAppProxyOptions{
+				TargetURL:            app.ServiceURL,
+				PathSuffix:           pathSuffix,
+				PublicPrefix:         externalAppMountPath(externalAppFrontendPrefix, appID),
+				PreservePrefix:       app.PreservePrefix,
+				ScopeCookiesToPrefix: true,
+			},
 		)
 		return
 	}
@@ -109,10 +112,13 @@ func (h *Handler) handleExternalAppBackend(w http.ResponseWriter, r *http.Reques
 	h.proxyExternalApp(
 		w,
 		r,
-		app.BackendURL,
-		pathSuffix,
-		externalAppMountPath(externalAppBackendPrefix, appID),
-		false,
+		externalAppProxyOptions{
+			TargetURL:            app.BackendURL,
+			PathSuffix:           pathSuffix,
+			PublicPrefix:         externalAppMountPath(externalAppBackendPrefix, appID),
+			PreservePrefix:       app.PreservePrefix,
+			ScopeCookiesToPrefix: false,
+		},
 	)
 }
 
@@ -186,33 +192,38 @@ func (h *Handler) serveExternalAppStaticFile(
 	http.ServeFile(w, r, fullPath)
 }
 
-func (h *Handler) proxyExternalApp(
-	w http.ResponseWriter,
-	r *http.Request,
-	rawTargetURL string,
-	pathSuffix string,
-	publicPrefix string,
-	scopeCookiesToPrefix bool,
-) {
-	target, err := parseExternalAppURL(rawTargetURL)
+type externalAppProxyOptions struct {
+	TargetURL            string
+	PathSuffix           string
+	PublicPrefix         string
+	PreservePrefix       bool
+	ScopeCookiesToPrefix bool
+}
+
+func (h *Handler) proxyExternalApp(w http.ResponseWriter, r *http.Request, opts externalAppProxyOptions) {
+	target, err := parseExternalAppURL(opts.TargetURL)
 	if err != nil {
 		logger.ErrorC("api", fmt.Sprintf("Invalid external app target: %v", err))
 		http.Error(w, "Invalid external app configuration", http.StatusInternalServerError)
 		return
 	}
+	upstreamPath := opts.PathSuffix
+	if opts.PreservePrefix {
+		upstreamPath = r.URL.Path
+	}
 
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(proxyReq *httputil.ProxyRequest) {
-			proxyReq.Out.URL.Path = pathSuffix
+			proxyReq.Out.URL.Path = upstreamPath
 			proxyReq.Out.URL.RawPath = ""
 			proxyReq.SetURL(target)
 			proxyReq.SetXForwarded()
-			proxyReq.Out.Header.Set("X-Forwarded-Prefix", publicPrefix)
+			proxyReq.Out.Header.Set("X-Forwarded-Prefix", opts.PublicPrefix)
 			removeLauncherAuthCookie(proxyReq.Out)
 		},
 		ModifyResponse: func(resp *http.Response) error {
-			rewriteExternalAppLocation(resp, target, publicPrefix)
-			rewriteExternalAppCookies(resp, target, publicPrefix, scopeCookiesToPrefix)
+			rewriteExternalAppLocation(resp, target, opts.PublicPrefix)
+			rewriteExternalAppCookies(resp, target, opts.PublicPrefix, opts.ScopeCookiesToPrefix)
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, proxyErr error) {
@@ -257,7 +268,7 @@ func rewriteExternalAppLocation(resp *http.Response, target *url.URL, publicPref
 		return
 	}
 
-	location.Path = joinExternalAppPath(publicPrefix, stripExternalAppTargetPath(location.Path, target.Path))
+	location.Path = externalAppPublicPath(location.Path, target.Path, publicPrefix)
 	location.RawPath = ""
 	resp.Header.Set("Location", location.String())
 }
@@ -279,10 +290,7 @@ func rewriteExternalAppCookies(
 		}
 		cookie.Domain = ""
 		if scopeToPrefix {
-			cookie.Path = joinExternalAppPath(
-				publicPrefix,
-				stripExternalAppTargetPath(cookie.Path, target.Path),
-			)
+			cookie.Path = externalAppPublicPath(cookie.Path, target.Path, publicPrefix)
 		} else {
 			// Split apps use separate frontend and API prefixes, so a narrower
 			// cookie path would make non-HttpOnly CSRF cookies invisible to the UI.
@@ -315,6 +323,15 @@ func joinExternalAppPath(prefix, suffix string) string {
 		return prefix + "/"
 	}
 	return prefix + "/" + strings.TrimLeft(suffix, "/")
+}
+
+func externalAppPublicPath(upstreamPath, targetBasePath, publicPrefix string) string {
+	pathWithoutTargetBase := stripExternalAppTargetPath(upstreamPath, targetBasePath)
+	cleanPrefix := strings.TrimRight(publicPrefix, "/")
+	if pathWithoutTargetBase == cleanPrefix || strings.HasPrefix(pathWithoutTargetBase, cleanPrefix+"/") {
+		return pathWithoutTargetBase
+	}
+	return joinExternalAppPath(cleanPrefix, pathWithoutTargetBase)
 }
 
 // ValidateExternalAppPath checks that a static file request stays inside basePath.
