@@ -2,6 +2,7 @@ package integrationtools
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 const (
 	maxImageGenerationPromptRunes = 32000
 	maxImageGenerationInputImages = 4
+	currentImageSelectorPrefix    = "current_image_"
 )
 
 var imageGenerationSizePattern = regexp.MustCompile(`^(?:auto|[1-9][0-9]{0,4}x[1-9][0-9]{0,4})$`)
@@ -60,7 +62,9 @@ func NewImageGenerateTool(
 func (t *ImageGenerateTool) Name() string { return "image_generate" }
 
 func (t *ImageGenerateTool) Description() string {
-	return "Generate an image from a text prompt, or edit current-turn reference images with a prompt, using the configured image model and send the result to the current chat."
+	return "Generate an image from a text prompt, or edit images already available in the current turn, using the configured image model and send the result to the current chat. " +
+		"For an image attached by the user or loaded earlier in this turn, use current_image_N (for example current_image_1) in input_images; do not call load_image or read_file for an already attached image. " +
+		"If the user provides only a local image path that has not been loaded, call load_image with that path first, then use the resulting current_image_N selector."
 }
 
 func (t *ImageGenerateTool) Parameters() map[string]any {
@@ -102,14 +106,14 @@ func (t *ImageGenerateTool) Parameters() map[string]any {
 			},
 			"input_images": map[string]any{
 				"type":        "array",
-				"description": "Optional MediaStore references or image paths shown in the current turn. Supplying images switches to image editing/reference generation.",
+				"description": "Optional current-turn image selectors for editing/reference generation. Use current_image_1 for the first supported image attached by the user or loaded/produced earlier in this turn, current_image_2 for the second, and so on. Do not call load_image or read_file for an already attached image. If the user provides only a local image path, call load_image on that path first; after it is loaded, use its current_image_N selector. Existing MediaStore references and validated [image:path] values from the current turn are also accepted.",
 				"items":       map[string]any{"type": "string"},
 				"minItems":    1,
 				"maxItems":    maxImageGenerationInputImages,
 			},
 			"mask": map[string]any{
 				"type":        "string",
-				"description": "Optional MediaStore reference or current-turn image path for an edit mask. It requires input_images.",
+				"description": "Optional current_image_N selector, MediaStore reference, or validated current-turn [image:path] for a PNG edit mask. If the mask is provided only as a local path, call load_image first. It requires input_images.",
 			},
 			"input_fidelity": map[string]any{
 				"type":        "string",
@@ -354,12 +358,33 @@ func (t *ImageGenerateTool) resolveInputImageWithRef(
 		)
 	}
 
+	imageIndex := 0
 	for _, ref := range refs {
+		ref = strings.TrimSpace(ref)
+		if strings.HasPrefix(strings.ToLower(ref), "data:image/") {
+			if !supportedInlineImageGenerationType(ref) {
+				continue
+			}
+			imageIndex++
+			if selector != ref && selector != currentImageSelector(imageIndex) {
+				continue
+			}
+			input, err := readInlineImageGenerationInput(ref, imageIndex, t.maxImageSize)
+			if err != nil {
+				return providers.ImageGenerationInput{}, "", err
+			}
+			return input, ref, nil
+		}
+
 		localPath, meta, err := t.mediaStore.ResolveWithMeta(ref)
 		if err != nil {
 			continue
 		}
-		matches := selector == ref
+		if !isSupportedImageGenerationFile(localPath) {
+			continue
+		}
+		imageIndex++
+		matches := selector == ref || selector == currentImageSelector(imageIndex)
 		if !matches && !strings.HasPrefix(selector, "media://") {
 			matches = filepath.Clean(selector) == filepath.Clean(localPath)
 			if !matches && strings.HasPrefix(selector, "[image:") && strings.HasSuffix(selector, "]") {
@@ -378,9 +403,63 @@ func (t *ImageGenerateTool) resolveInputImageWithRef(
 	}
 
 	return providers.ImageGenerationInput{}, "", fmt.Errorf(
-		"image %q is not one of the current turn's MediaStore images",
+		"image %q is not available in the current turn; use current_image_N for an attached image, or call load_image first for a local path",
 		selector,
 	)
+}
+
+func currentImageSelector(index int) string {
+	return fmt.Sprintf("%s%d", currentImageSelectorPrefix, index)
+}
+
+func supportedInlineImageGenerationType(dataURL string) bool {
+	header, _, found := strings.Cut(dataURL, ",")
+	if !found {
+		return false
+	}
+	mediaType := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(header, "data:")))
+	mediaType, _, _ = strings.Cut(mediaType, ";")
+	return imageExtension(mediaType) != ""
+}
+
+func isSupportedImageGenerationFile(localPath string) bool {
+	kind, err := filetype.MatchFile(localPath)
+	return err == nil && kind != filetype.Unknown && imageExtension(kind.MIME.Value) != ""
+}
+
+func readInlineImageGenerationInput(
+	dataURL string,
+	imageIndex int,
+	maxImageSize int,
+) (providers.ImageGenerationInput, error) {
+	header, value, found := strings.Cut(strings.TrimSpace(dataURL), ",")
+	header = strings.ToLower(strings.TrimSpace(header))
+	if !found || !strings.HasPrefix(header, "data:image/") || !strings.Contains(header, ";base64") {
+		return providers.ImageGenerationInput{}, fmt.Errorf("current_image_%d is not a valid base64 image data URL", imageIndex)
+	}
+	value = strings.NewReplacer("\n", "", "\r", "", "\t", "", " ", "").Replace(value)
+	if value == "" {
+		return providers.ImageGenerationInput{}, fmt.Errorf("current_image_%d is empty", imageIndex)
+	}
+	if base64.StdEncoding.DecodedLen(len(value)) > maxImageSize+2 {
+		return providers.ImageGenerationInput{}, fmt.Errorf("current_image_%d exceeds %d bytes", imageIndex, maxImageSize)
+	}
+	data, err := base64.StdEncoding.DecodeString(value)
+	if err != nil {
+		return providers.ImageGenerationInput{}, fmt.Errorf("current_image_%d has invalid base64 data: %w", imageIndex, err)
+	}
+	if len(data) > maxImageSize {
+		return providers.ImageGenerationInput{}, fmt.Errorf("current_image_%d exceeds %d bytes", imageIndex, maxImageSize)
+	}
+	kind, err := filetype.Match(data)
+	if err != nil || kind == filetype.Unknown || imageExtension(kind.MIME.Value) == "" {
+		return providers.ImageGenerationInput{}, fmt.Errorf("current_image_%d has an unsupported or unrecognized image type", imageIndex)
+	}
+	return providers.ImageGenerationInput{
+		Data:        data,
+		ContentType: kind.MIME.Value,
+		Filename:    currentImageSelector(imageIndex) + imageExtension(kind.MIME.Value),
+	}, nil
 }
 
 func readImageGenerationInput(
