@@ -441,13 +441,9 @@ func setupAndStartServices(
 	}
 	fmt.Println("✓ Heartbeat service started")
 
-	runningServices.MediaStore = media.NewFileMediaStoreWithCleanup(media.MediaCleanerConfig{
-		Enabled:  cfg.Tools.MediaCleanup.Enabled,
-		MaxAge:   time.Duration(cfg.Tools.MediaCleanup.MaxAge) * time.Minute,
-		Interval: time.Duration(cfg.Tools.MediaCleanup.Interval) * time.Minute,
-	})
-	if fms, ok := runningServices.MediaStore.(*media.FileMediaStore); ok {
-		fms.Start()
+	runningServices.MediaStore, err = media.NewWorkspaceMediaStore(cfg.WorkspacePath())
+	if err != nil {
+		return nil, fmt.Errorf("error creating workspace media store: %w", err)
 	}
 
 	runningServices.ChannelManager, err = channels.NewManager(
@@ -457,9 +453,6 @@ func setupAndStartServices(
 		channels.WithRuntimeEvents(agentLoop.RuntimeEventBus()),
 	)
 	if err != nil {
-		if fms, ok := runningServices.MediaStore.(*media.FileMediaStore); ok {
-			fms.Stop()
-		}
 		return nil, fmt.Errorf("error creating channel manager: %w", err)
 	}
 
@@ -689,13 +682,9 @@ func restartServices(
 	}
 	fmt.Println("  ✓ Heartbeat service restarted")
 
-	runningServices.MediaStore = media.NewFileMediaStoreWithCleanup(media.MediaCleanerConfig{
-		Enabled:  cfg.Tools.MediaCleanup.Enabled,
-		MaxAge:   time.Duration(cfg.Tools.MediaCleanup.MaxAge) * time.Minute,
-		Interval: time.Duration(cfg.Tools.MediaCleanup.Interval) * time.Minute,
-	})
-	if fms, ok := runningServices.MediaStore.(*media.FileMediaStore); ok {
-		fms.Start()
+	runningServices.MediaStore, err = media.NewWorkspaceMediaStore(cfg.WorkspacePath())
+	if err != nil {
+		return fmt.Errorf("error recreating workspace media store: %w", err)
 	}
 	if runningServices.ChannelManager != nil {
 		runningServices.ChannelManager.SetMediaStore(runningServices.MediaStore)

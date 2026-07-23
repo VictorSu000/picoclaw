@@ -55,6 +55,7 @@ PicoClaw stores data in your configured workspace (default: `~/.picoclaw/workspa
 
 ```
 ~/.picoclaw/workspace/
+├── media/             # Permanently stored inbound and outbound media
 ├── sessions/          # Conversation sessions and history
 ├── memory/           # Long-term memory (MEMORY.md)
 ├── state/            # Persistent state (last channel, etc.)

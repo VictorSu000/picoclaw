@@ -53,6 +53,7 @@ PicoClaw 将数据存储在您配置的工作区中（默认：`~/.picoclaw/work
 
 ```
 ~/.picoclaw/workspace/
+├── media/             # 永久保存的输入和输出媒体文件
 ├── sessions/          # 对话会话和历史
 ├── memory/           # 长期记忆 (MEMORY.md)
 ├── state/            # 持久化状态 (最后一次频道等)

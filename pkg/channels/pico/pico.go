@@ -298,7 +298,7 @@ func (c *PicoChannel) Stop(ctx context.Context) error {
 	if c.progress != nil {
 		c.progress.StopAll()
 	}
-	c.releaseAllUploads()
+	c.clearUploadCache()
 
 	logger.InfoC("pico", "Pico Protocol channel stopped")
 	return nil
@@ -1007,6 +1007,7 @@ func (c *PicoChannel) handleMediaUpload(w http.ResponseWriter, r *http.Request) 
 		Filename:      filename,
 		ContentType:   contentType,
 		Source:        "pico:upload",
+		SessionID:     sessionID,
 		CleanupPolicy: media.CleanupPolicyDeleteOnCleanup,
 	}, scope)
 	if err != nil {
@@ -1104,42 +1105,45 @@ func (c *PicoChannel) handleMediaDelete(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	c.uploadsMu.Lock()
-	upload, ok := c.uploads[refID]
-	if ok && upload.sessionID == sessionID {
-		delete(c.uploads, refID)
-	} else {
-		ok = false
-	}
-	c.uploadsMu.Unlock()
-	if !ok {
-		http.NotFound(w, r)
+	store := c.GetMediaStore()
+	if store == nil {
+		http.Error(w, "media store unavailable", http.StatusServiceUnavailable)
 		return
 	}
 
-	store := c.GetMediaStore()
-	if store != nil {
+	ref := "media://" + refID
+	c.uploadsMu.Lock()
+	upload, cached := c.uploads[refID]
+	if cached && upload.sessionID == sessionID {
+		delete(c.uploads, refID)
+	} else {
+		cached = false
+	}
+	c.uploadsMu.Unlock()
+
+	if !cached {
+		_, meta, err := store.ResolveWithMeta(ref)
+		if err != nil || meta.Source != "pico:upload" || meta.SessionID != sessionID {
+			http.NotFound(w, r)
+			return
+		}
+	}
+
+	if deleter, ok := store.(media.MediaDeleter); ok {
+		if err := deleter.Delete(ref); err != nil {
+			http.Error(w, "failed to delete media", http.StatusInternalServerError)
+			return
+		}
+	} else if cached {
 		_ = store.ReleaseAll(upload.scope)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (c *PicoChannel) releaseAllUploads() {
+func (c *PicoChannel) clearUploadCache() {
 	c.uploadsMu.Lock()
-	uploads := make([]picoUpload, 0, len(c.uploads))
-	for _, upload := range c.uploads {
-		uploads = append(uploads, upload)
-	}
 	clear(c.uploads)
 	c.uploadsMu.Unlock()
-
-	store := c.GetMediaStore()
-	if store == nil {
-		return
-	}
-	for _, upload := range uploads {
-		_ = store.ReleaseAll(upload.scope)
-	}
 }
 
 func picoRefIDFromMediaPath(path string) string {
@@ -1546,11 +1550,96 @@ func (c *PicoChannel) parseInboundMedia(payload map[string]any, sessionID string
 	if err != nil {
 		return nil, err
 	}
+	inlineRefs, err := c.storeInlineImages(inlineMedia, sessionID)
+	if err != nil {
+		return nil, err
+	}
 	uploadedMedia, err := c.parseUploadedMediaAttachments(payload["attachments"], sessionID)
 	if err != nil {
 		return nil, err
 	}
-	return append(inlineMedia, uploadedMedia...), nil
+	return append(inlineRefs, uploadedMedia...), nil
+}
+
+func (c *PicoChannel) storeInlineImages(values []string, sessionID string) ([]string, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	store := c.GetMediaStore()
+	if store == nil {
+		// Keep protocol parsing usable for lightweight embedders that do not
+		// inject a media store. Gateway production always injects the durable
+		// workspace store, so inline images are persisted there in normal use.
+		return append([]string(nil), values...), nil
+	}
+	if err := os.MkdirAll(media.TempDir(), 0o700); err != nil {
+		return nil, fmt.Errorf("prepare inline media: %w", err)
+	}
+
+	refs := make([]string, 0, len(values))
+	for i, value := range values {
+		header, encoded, found := strings.Cut(value, ",")
+		if !found {
+			return nil, fmt.Errorf("inline image %d is malformed", i)
+		}
+		contentType := strings.TrimSpace(strings.TrimPrefix(header, "data:"))
+		if semi := strings.IndexByte(contentType, ';'); semi >= 0 {
+			contentType = contentType[:semi]
+		}
+		ext := picoInlineImageExtension(contentType)
+		if ext == "" {
+			return nil, fmt.Errorf("inline image %d has unsupported content type %q", i, contentType)
+		}
+		data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
+		if err != nil {
+			return nil, fmt.Errorf("decode inline image %d: %w", i, err)
+		}
+
+		file, err := os.CreateTemp(media.TempDir(), "pico-inline-*"+ext)
+		if err != nil {
+			return nil, fmt.Errorf("create inline image %d: %w", i, err)
+		}
+		path := file.Name()
+		if _, err := file.Write(data); err != nil {
+			_ = file.Close()
+			_ = os.Remove(path)
+			return nil, fmt.Errorf("write inline image %d: %w", i, err)
+		}
+		if err := file.Close(); err != nil {
+			_ = os.Remove(path)
+			return nil, fmt.Errorf("close inline image %d: %w", i, err)
+		}
+
+		ref, err := store.Store(path, media.MediaMeta{
+			Filename:    fmt.Sprintf("inline-image-%d%s", i+1, ext),
+			ContentType: contentType,
+			Source:      "pico:inline",
+			SessionID:   sessionID,
+		}, fmt.Sprintf("pico:%s:inline:%s", sessionID, uuid.New().String()))
+		if err != nil {
+			_ = os.Remove(path)
+			return nil, fmt.Errorf("store inline image %d: %w", i, err)
+		}
+		refs = append(refs, ref)
+	}
+	return refs, nil
+}
+
+func picoInlineImageExtension(contentType string) string {
+	switch strings.ToLower(strings.TrimSpace(contentType)) {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/png":
+		return ".png"
+	case "image/gif":
+		return ".gif"
+	case "image/webp":
+		return ".webp"
+	case "image/bmp":
+		return ".bmp"
+	default:
+		return ""
+	}
 }
 
 func (c *PicoChannel) parseUploadedMediaAttachments(raw any, sessionID string) ([]string, error) {
@@ -1583,23 +1672,39 @@ func (c *PicoChannel) parseUploadedMediaAttachments(raw any, sessionID string) (
 			return nil, fmt.Errorf("attachments[%d]: attachment was not uploaded by Pico", i)
 		}
 
-		c.uploadsMu.RLock()
-		upload, exists := c.uploads[refID]
-		c.uploadsMu.RUnlock()
-		if !exists || upload.sessionID != sessionID {
-			return nil, fmt.Errorf("attachments[%d]: attachment is unavailable for this session", i)
-		}
 		store := c.GetMediaStore()
 		if store == nil {
 			return nil, fmt.Errorf("attachments[%d]: media store unavailable", i)
 		}
-		if _, _, err := store.ResolveWithMeta(upload.ref); err != nil {
+
+		ref := "media://" + refID
+		c.uploadsMu.RLock()
+		upload, exists := c.uploads[refID]
+		c.uploadsMu.RUnlock()
+		if exists {
+			if upload.sessionID != sessionID {
+				return nil, fmt.Errorf("attachments[%d]: attachment is unavailable for this session", i)
+			}
+			ref = upload.ref
+		}
+
+		_, meta, err := store.ResolveWithMeta(ref)
+		if err != nil {
 			c.uploadsMu.Lock()
 			delete(c.uploads, refID)
 			c.uploadsMu.Unlock()
-			return nil, fmt.Errorf("attachments[%d]: attachment has expired", i)
+			return nil, fmt.Errorf("attachments[%d]: attachment is unavailable", i)
 		}
-		refs = append(refs, upload.ref)
+		if meta.Source != "pico:upload" || meta.SessionID != sessionID {
+			return nil, fmt.Errorf("attachments[%d]: attachment is unavailable for this session", i)
+		}
+
+		if !exists {
+			c.uploadsMu.Lock()
+			c.uploads[refID] = picoUpload{ref: ref, sessionID: sessionID}
+			c.uploadsMu.Unlock()
+		}
+		refs = append(refs, ref)
 	}
 	return refs, nil
 }

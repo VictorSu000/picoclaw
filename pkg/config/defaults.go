@@ -317,13 +317,6 @@ func DefaultConfig() *Config {
 		Tools: ToolsConfig{
 			FilterSensitiveData: true,
 			FilterMinLength:     8,
-			MediaCleanup: MediaCleanupConfig{
-				ToolConfig: ToolConfig{
-					Enabled: true,
-				},
-				MaxAge:   30,
-				Interval: 5,
-			},
 			Web: WebToolsConfig{
 				ToolConfig: ToolConfig{
 					Enabled: true,

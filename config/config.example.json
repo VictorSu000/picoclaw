@@ -517,11 +517,6 @@
         "ttl_seconds": 300
       }
     },
-    "media_cleanup": {
-      "enabled": true,
-      "max_age_minutes": 30,
-      "interval_minutes": 5
-    },
     "append_file": {
       "enabled": true
     },

@@ -26,17 +26,18 @@ const (
 
 // MediaMeta holds metadata about a stored media file.
 type MediaMeta struct {
-	Filename      string
-	ContentType   string
-	Source        string        // "telegram", "discord", "tool:image-gen", etc.
-	CleanupPolicy CleanupPolicy // defaults to CleanupPolicyDeleteOnCleanup
+	Filename      string        `json:"filename,omitempty"`
+	ContentType   string        `json:"content_type,omitempty"`
+	Source        string        `json:"source,omitempty"`         // "telegram", "discord", "tool:image-gen", etc.
+	SessionID     string        `json:"session_id,omitempty"`     // optional owner session for channel-scoped uploads
+	CleanupPolicy CleanupPolicy `json:"cleanup_policy,omitempty"` // defaults to CleanupPolicyDeleteOnCleanup
 }
 
 // MediaStore manages the lifecycle of media files associated with processing scopes.
 type MediaStore interface {
-	// Store registers an existing local file under the given scope.
+	// Store registers an existing local file under the given scope. A store may
+	// copy the source into managed durable storage before returning.
 	// Returns a ref identifier (e.g. "media://<id>").
-	// Store does not move or copy the file; it only records the mapping.
 	// If meta.CleanupPolicy is empty, CleanupPolicyDeleteOnCleanup is assumed.
 	Store(localPath string, meta MediaMeta, scope string) (ref string, err error)
 
@@ -46,9 +47,16 @@ type MediaStore interface {
 	// ResolveWithMeta returns the local file path and metadata for a given ref.
 	ResolveWithMeta(ref string) (localPath string, meta MediaMeta, err error)
 
-	// ReleaseAll deletes all files registered under the given scope
-	// and removes the mapping entries. File-not-exist errors are ignored.
+	// ReleaseAll releases transient ownership for a scope. Ephemeral stores may
+	// remove files and mappings; durable stores keep permanent refs intact.
 	ReleaseAll(scope string) error
+}
+
+// MediaDeleter is implemented by persistent stores that support explicit user
+// deletion. Lifecycle release and explicit deletion are intentionally separate:
+// persistent media must not disappear when a turn, channel, or process ends.
+type MediaDeleter interface {
+	Delete(ref string) error
 }
 
 // mediaEntry holds the path and metadata for a stored media file.
@@ -70,8 +78,9 @@ type MediaCleanerConfig struct {
 	Interval time.Duration
 }
 
-// FileMediaStore is a pure in-memory implementation of MediaStore.
-// Files are expected to already exist on disk (e.g. in /tmp/picoclaw_media/).
+// FileMediaStore is the legacy in-memory implementation used by isolated
+// embedders and unit tests. Gateway production uses WorkspaceMediaStore so
+// media refs and files survive process restarts.
 type FileMediaStore struct {
 	mu          sync.RWMutex
 	refs        map[string]mediaEntry

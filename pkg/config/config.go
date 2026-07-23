@@ -1108,12 +1108,6 @@ type SkillsToolsConfig struct {
 	SearchCache           SearchCacheConfig  `yaml:"-"                json:"search_cache"`
 }
 
-type MediaCleanupConfig struct {
-	ToolConfig `    envPrefix:"PICOCLAW_MEDIA_CLEANUP_"`
-	MaxAge     int `                                    json:"max_age_minutes"  env:"PICOCLAW_MEDIA_CLEANUP_MAX_AGE"`
-	Interval   int `                                    json:"interval_minutes" env:"PICOCLAW_MEDIA_CLEANUP_INTERVAL"`
-}
-
 type ReadFileToolConfig struct {
 	Enabled         bool   `json:"enabled"`
 	Mode            string `json:"mode"`
@@ -1151,7 +1145,6 @@ type ToolsConfig struct {
 	Cron            CronToolsConfig          `json:"cron"              yaml:"-"`
 	Exec            ExecConfig               `json:"exec"              yaml:"-"`
 	Skills          SkillsToolsConfig        `json:"skills"            yaml:"skills,omitempty"`
-	MediaCleanup    MediaCleanupConfig       `json:"media_cleanup"     yaml:"-"`
 	MCP             MCPConfig                `json:"mcp"               yaml:"-"`
 	AppendFile      ToolConfig               `json:"append_file"       yaml:"-"                                                       envPrefix:"PICOCLAW_TOOLS_APPEND_FILE_"`
 	EditFile        ToolConfig               `json:"edit_file"         yaml:"-"                                                       envPrefix:"PICOCLAW_TOOLS_EDIT_FILE_"`
@@ -1908,8 +1901,6 @@ func (t *ToolsConfig) IsToolEnabled(name string) bool {
 		return t.Exec.Enabled
 	case "skills":
 		return t.Skills.Enabled
-	case "media_cleanup":
-		return t.MediaCleanup.Enabled
 	case "append_file":
 		return t.AppendFile.Enabled
 	case "edit_file":

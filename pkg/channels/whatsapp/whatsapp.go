@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/identity"
 	"github.com/sipeed/picoclaw/pkg/logger"
+	"github.com/sipeed/picoclaw/pkg/media"
 	"github.com/sipeed/picoclaw/pkg/utils"
 )
 
@@ -243,6 +245,27 @@ func (c *WhatsAppChannel) handleIncomingMessage(msg map[string]any) {
 
 	if !c.IsAllowedSender(sender) {
 		return
+	}
+
+	if len(mediaPaths) > 0 {
+		scope := channels.BuildMediaScope("whatsapp", chatID, messageID)
+		store := c.GetMediaStore()
+		if store != nil {
+			storedPaths := make([]string, 0, len(mediaPaths))
+			for _, path := range mediaPaths {
+				ref, err := store.Store(path, media.MediaMeta{
+					Filename:      filepath.Base(path),
+					Source:        "whatsapp",
+					CleanupPolicy: media.CleanupPolicyForgetOnly,
+				}, scope)
+				if err == nil {
+					storedPaths = append(storedPaths, ref)
+				} else {
+					storedPaths = append(storedPaths, path)
+				}
+			}
+			mediaPaths = storedPaths
+		}
 	}
 
 	inboundCtx := bus.InboundContext{
