@@ -81,6 +81,10 @@ RUN npm config set registry https://mirrors.tencent.com/npm/ && npm install -g c
 # install python packges
 RUN pip config set global.index-url https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple && pip install --break-system-packages openpyxl pandas xlrd xlwt python-docx requests boto3 akshare akquant matplotlib
 
+# install ppt master dependency
+# google-genai>=1.0.0 flask>=3.0.0 暂不安装
+RUN pip install --break-system-packages python-pptx>=0.6.21 XlsxWriter>=3.0.0 edge-tts>=7.2.8 PyMuPDF>=1.23.0 mammoth>=1.6.0 markdownify>=0.11.6 ebooklib>=0.18 nbconvert>=7.0.0 openpyxl>=3.1.0 Pillow>=9.0.0 numpy>=1.20.0 requests>=2.31.0 beautifulsoup4>=4.12.0 curl_cffi>=0.7.0
+
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -q --spider http://localhost:18790/health || exit 1
