@@ -36,6 +36,22 @@ func ContextSummaryTemperature() float64 {
 	return contextSummaryTemperature
 }
 
+// contextSummaryTarget selects the model used by background context compaction.
+// A configured fast model is authoritative: if it failed to initialize, callers
+// use their deterministic fallback instead of silently sending work to the main model.
+func contextSummaryTarget(
+	agent *AgentInstance,
+	al *AgentLoop,
+) (providers.LLMProvider, string) {
+	if agent == nil {
+		return nil, ""
+	}
+	if strings.TrimSpace(agent.FastModel) != "" {
+		return agent.FastProvider, strings.TrimSpace(agent.FastModelID)
+	}
+	return withCurrentCandidateRateLimit(agent.Provider, al, agent.Candidates), strings.TrimSpace(agent.Model)
+}
+
 // BuildContextSummary creates a context summary using the legacy context
 // compression strategy. Only user and assistant messages are summarized;
 // oversized messages are omitted, long histories are summarized in two parts

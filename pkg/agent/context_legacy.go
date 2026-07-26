@@ -212,25 +212,28 @@ func (m *legacyContextManager) summarizeSession(agent *AgentInstance, sessionKey
 	keepCount := len(history) - safeCut
 	toSummarize := history[:safeCut]
 
-	provider := withCurrentCandidateRateLimit(agent.Provider, m.al, agent.Candidates)
-	complete := func(ctx context.Context, prompt string) (string, error) {
-		m.al.activeRequestsInc()
-		defer m.al.activeRequestsDec()
-		resp, err := provider.Chat(
-			ctx,
-			[]providers.Message{{Role: "user", Content: prompt}},
-			nil,
-			agent.Model,
-			map[string]any{
-				"max_tokens":       agent.MaxTokens,
-				"temperature":      ContextSummaryTemperature(),
-				"prompt_cache_key": agent.ID,
-			},
-		)
-		if resp == nil {
-			return "", err
+	provider, model := contextSummaryTarget(agent, m.al)
+	var complete ContextSummaryCompletion
+	if provider != nil && model != "" {
+		complete = func(ctx context.Context, prompt string) (string, error) {
+			m.al.activeRequestsInc()
+			defer m.al.activeRequestsDec()
+			resp, err := provider.Chat(
+				ctx,
+				[]providers.Message{{Role: "user", Content: prompt}},
+				nil,
+				model,
+				map[string]any{
+					"max_tokens":       agent.MaxTokens,
+					"temperature":      ContextSummaryTemperature(),
+					"prompt_cache_key": agent.ID,
+				},
+			)
+			if resp == nil {
+				return "", err
+			}
+			return resp.Content, err
 		}
-		return resp.Content, err
 	}
 	result := BuildContextSummary(
 		ctx,

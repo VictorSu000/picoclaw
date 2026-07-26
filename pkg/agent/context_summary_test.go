@@ -100,3 +100,44 @@ func TestBuildContextSummaryUsesOriginalFallback(t *testing.T) {
 		t.Fatalf("Summary = %q", result.Summary)
 	}
 }
+
+func TestContextSummaryTargetPrefersFastModel(t *testing.T) {
+	mainProvider := &simpleMockProvider{response: "main"}
+	fastProvider := &simpleMockProvider{response: "fast"}
+	agent := &AgentInstance{
+		Model:        "main-model",
+		Provider:     mainProvider,
+		FastModel:    "fast-alias",
+		FastModelID:  "fast-model-id",
+		FastProvider: fastProvider,
+	}
+
+	provider, model := contextSummaryTarget(agent, nil)
+	if provider != fastProvider || model != "fast-model-id" {
+		t.Fatalf("target = (%T, %q), want configured fast model", provider, model)
+	}
+}
+
+func TestContextSummaryTargetUsesMainModelOnlyWithoutFastModel(t *testing.T) {
+	mainProvider := &simpleMockProvider{response: "main"}
+	agent := &AgentInstance{Model: "main-model", Provider: mainProvider}
+
+	provider, model := contextSummaryTarget(agent, nil)
+	if provider != mainProvider || model != "main-model" {
+		t.Fatalf("target = (%T, %q), want main model", provider, model)
+	}
+}
+
+func TestContextSummaryTargetDoesNotFallBackForInvalidFastModel(t *testing.T) {
+	mainProvider := &simpleMockProvider{response: "main"}
+	agent := &AgentInstance{
+		Model:     "main-model",
+		Provider:  mainProvider,
+		FastModel: "broken-fast-alias",
+	}
+
+	provider, model := contextSummaryTarget(agent, nil)
+	if provider != nil || model != "" {
+		t.Fatalf("target = (%T, %q), want unavailable fast target", provider, model)
+	}
+}
