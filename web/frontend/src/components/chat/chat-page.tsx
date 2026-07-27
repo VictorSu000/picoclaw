@@ -68,6 +68,7 @@ import { useSessionHistory } from "@/hooks/use-session-history"
 import type { AssistantDetailVisibility } from "@/store/chat"
 import type { ConnectionState } from "@/store/chat"
 import type { ChatAttachment } from "@/store/chat"
+import type { ContextUsage } from "@/store/chat"
 import {
   assistantDetailVisibilityAtom,
   shouldShowAssistantMessage,
@@ -185,52 +186,30 @@ function CompressedHistoryNotice({
   )
 }
 
-export function ChatPage() {
+type SendChatMessage = (input: {
+  content: string
+  attachments?: ChatAttachment[]
+}) => boolean
+
+function ChatInputArea({
+  activeSessionId,
+  inputDisabledReason,
+  contextUsage,
+  sendMessage,
+}: {
+  activeSessionId: string
+  inputDisabledReason: ChatInputDisabledReason | null
+  contextUsage?: ContextUsage
+  sendMessage: SendChatMessage
+}) {
   const { t } = useTranslation()
-  const scrollRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragDepthRef = useRef(0)
-  const [isAtBottom, setIsAtBottom] = useState(true)
-  const [hasScrolled, setHasScrolled] = useState(false)
+  const activeSessionIdRef = useRef(activeSessionId)
   const [input, setInput] = useState("")
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
   const [isDragActive, setIsDragActive] = useState(false)
   const [isUploadingAttachments, setIsUploadingAttachments] = useState(false)
-  const [assistantDetailVisibility, setAssistantDetailVisibility] = useAtom(
-    assistantDetailVisibilityAtom,
-  )
-
-  const assistantDetailVisibilityOptions: Array<{
-    value: AssistantDetailVisibility
-    label: string
-  }> = [
-    { value: "none", label: t("chat.assistantDetailVisibility.none") },
-    { value: "thought", label: t("chat.assistantDetailVisibility.thought") },
-    {
-      value: "tool_calls",
-      label: t("chat.assistantDetailVisibility.toolCalls"),
-    },
-    { value: "all", label: t("chat.assistantDetailVisibility.all") },
-  ]
-
-  const {
-    messages,
-    connectionState,
-    isTyping,
-    activeSessionId,
-    contextUsage,
-    sessionSummary,
-    archivedMessageCount,
-    agentPresetName,
-    agentPresetOverride,
-    effectiveModelName: storedEffectiveModelName,
-    sendMessage,
-    switchSession,
-    newChat,
-    forkChat,
-    deleteMessageSeries,
-  } = usePicoChat()
-  const activeSessionIdRef = useRef(activeSessionId)
 
   useEffect(() => {
     activeSessionIdRef.current = activeSessionId
@@ -238,76 +217,7 @@ export function ChatPage() {
     setAttachments([])
   }, [activeSessionId])
 
-  const { state: gwState } = useGateway()
-  const isGatewayRunning = gwState === "running"
-
-  const {
-    defaultModelName,
-    hasAvailableModels,
-    apiKeyModels,
-    oauthModels,
-    localModels,
-    handleSetDefault,
-  } = useChatModels({ isConnected: isGatewayRunning })
-  const {
-    presets,
-    isLoading: presetsLoading,
-    isChanging: presetChanging,
-    isPresetActive,
-    effectiveModelName,
-    fallbacks: presetFallbacks,
-    agentPresetName: effectiveAgentPresetName,
-    changePreset,
-  } = useAgentPresets({
-    activeSessionId,
-    agentPresetName,
-    agentPresetOverride,
-    storedEffectiveModelName,
-  })
-  const selectedModelName = isPresetActive
-    ? effectiveModelName
-    : defaultModelName
-  const hasDefaultModel = Boolean(selectedModelName)
-  const inputDisabledReason = resolveChatInputDisabledReason({
-    hasDefaultModel,
-    connectionState,
-    gatewayState: gwState,
-  })
   const canInput = inputDisabledReason === null
-
-  const {
-    sessions,
-    hasMore,
-    loadError,
-    loadErrorMessage,
-    observerRef,
-    loadSessions,
-    handleDeleteSession,
-    handleToggleFavorite,
-    handleRenameSession,
-  } = useSessionHistory({
-    activeSessionId,
-    onDeletedActiveSession: newChat,
-  })
-
-  const syncScrollState = (element: HTMLDivElement) => {
-    const { clientHeight, scrollHeight, scrollTop } = element
-    setHasScrolled(scrollTop > 0)
-    setIsAtBottom(scrollHeight - scrollTop <= clientHeight + 10)
-  }
-
-  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    syncScrollState(e.currentTarget)
-  }
-
-  useEffect(() => {
-    if (scrollRef.current) {
-      if (isAtBottom) {
-        scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-      }
-      syncScrollState(scrollRef.current)
-    }
-  }, [messages, isTyping, isAtBottom])
 
   const handleSend = () => {
     if (
@@ -467,6 +377,153 @@ export function ChatPage() {
     canInput &&
     !isUploadingAttachments &&
     (Boolean(input.trim()) || attachments.length > 0)
+
+  return (
+    <>
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={handleAttachmentSelection}
+      />
+
+      <ChatComposer
+        input={input}
+        attachments={attachments}
+        onInputChange={setInput}
+        onAddAttachments={handleAddAttachments}
+        onPaste={handleComposerPaste}
+        onDragEnter={handleComposerDragEnter}
+        onDragLeave={handleComposerDragLeave}
+        onDragOver={handleComposerDragOver}
+        onDrop={handleComposerDrop}
+        onRemoveAttachment={handleRemoveAttachment}
+        onSend={handleSend}
+        onContextDetail={() => {
+          if (sendMessage({ content: "/context", attachments: [] })) {
+            setInput("")
+          }
+        }}
+        inputDisabledReason={inputDisabledReason}
+        canSend={canSubmit}
+        isDragActive={isDragActive}
+        isUploadingAttachments={isUploadingAttachments}
+        contextUsage={contextUsage}
+      />
+    </>
+  )
+}
+
+export function ChatPage() {
+  const { t } = useTranslation()
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [isAtBottom, setIsAtBottom] = useState(true)
+  const [hasScrolled, setHasScrolled] = useState(false)
+  const [assistantDetailVisibility, setAssistantDetailVisibility] = useAtom(
+    assistantDetailVisibilityAtom,
+  )
+
+  const assistantDetailVisibilityOptions: Array<{
+    value: AssistantDetailVisibility
+    label: string
+  }> = [
+    { value: "none", label: t("chat.assistantDetailVisibility.none") },
+    { value: "thought", label: t("chat.assistantDetailVisibility.thought") },
+    {
+      value: "tool_calls",
+      label: t("chat.assistantDetailVisibility.toolCalls"),
+    },
+    { value: "all", label: t("chat.assistantDetailVisibility.all") },
+  ]
+
+  const {
+    messages,
+    connectionState,
+    isTyping,
+    activeSessionId,
+    contextUsage,
+    sessionSummary,
+    archivedMessageCount,
+    agentPresetName,
+    agentPresetOverride,
+    effectiveModelName: storedEffectiveModelName,
+    sendMessage,
+    switchSession,
+    newChat,
+    forkChat,
+    deleteMessageSeries,
+  } = usePicoChat()
+
+  const { state: gwState } = useGateway()
+  const isGatewayRunning = gwState === "running"
+
+  const {
+    defaultModelName,
+    hasAvailableModels,
+    apiKeyModels,
+    oauthModels,
+    localModels,
+    handleSetDefault,
+  } = useChatModels({ isConnected: isGatewayRunning })
+  const {
+    presets,
+    isLoading: presetsLoading,
+    isChanging: presetChanging,
+    isPresetActive,
+    effectiveModelName,
+    fallbacks: presetFallbacks,
+    agentPresetName: effectiveAgentPresetName,
+    changePreset,
+  } = useAgentPresets({
+    activeSessionId,
+    agentPresetName,
+    agentPresetOverride,
+    storedEffectiveModelName,
+  })
+  const selectedModelName = isPresetActive
+    ? effectiveModelName
+    : defaultModelName
+  const hasDefaultModel = Boolean(selectedModelName)
+  const inputDisabledReason = resolveChatInputDisabledReason({
+    hasDefaultModel,
+    connectionState,
+    gatewayState: gwState,
+  })
+
+  const {
+    sessions,
+    hasMore,
+    loadError,
+    loadErrorMessage,
+    observerRef,
+    loadSessions,
+    handleDeleteSession,
+    handleToggleFavorite,
+    handleRenameSession,
+  } = useSessionHistory({
+    activeSessionId,
+    onDeletedActiveSession: newChat,
+  })
+
+  const syncScrollState = (element: HTMLDivElement) => {
+    const { clientHeight, scrollHeight, scrollTop } = element
+    setHasScrolled(scrollTop > 0)
+    setIsAtBottom(scrollHeight - scrollTop <= clientHeight + 10)
+  }
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    syncScrollState(e.currentTarget)
+  }
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      if (isAtBottom) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+      }
+      syncScrollState(scrollRef.current)
+    }
+  }, [messages, isTyping, isAtBottom])
 
   const [forkingMessageIndex, setForkingMessageIndex] = useState<number | null>(
     null,
@@ -757,36 +814,11 @@ export function ChatPage() {
         </div>
       </div>
 
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        className="hidden"
-        onChange={handleAttachmentSelection}
-      />
-
-      <ChatComposer
-        input={input}
-        attachments={attachments}
-        onInputChange={setInput}
-        onAddAttachments={handleAddAttachments}
-        onPaste={handleComposerPaste}
-        onDragEnter={handleComposerDragEnter}
-        onDragLeave={handleComposerDragLeave}
-        onDragOver={handleComposerDragOver}
-        onDrop={handleComposerDrop}
-        onRemoveAttachment={handleRemoveAttachment}
-        onSend={handleSend}
-        onContextDetail={() => {
-          if (sendMessage({ content: "/context", attachments: [] })) {
-            setInput("")
-          }
-        }}
+      <ChatInputArea
+        activeSessionId={activeSessionId}
         inputDisabledReason={inputDisabledReason}
-        canSend={canSubmit}
-        isDragActive={isDragActive}
-        isUploadingAttachments={isUploadingAttachments}
         contextUsage={contextUsage}
+        sendMessage={sendMessage}
       />
 
       <AlertDialog

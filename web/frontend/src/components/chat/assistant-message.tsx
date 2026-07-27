@@ -5,7 +5,7 @@ import {
   IconCopy,
   IconTool,
 } from "@tabler/icons-react"
-import { useState } from "react"
+import { memo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import ReactMarkdown from "react-markdown"
 import rehypeHighlight from "rehype-highlight"
@@ -37,7 +37,7 @@ interface AssistantMessageProps {
   timestamp?: string | number
 }
 
-export function AssistantMessage({
+export const AssistantMessage = memo(function AssistantMessage({
   content,
   attachments = [],
   kind = "normal",
@@ -72,7 +72,7 @@ export function AssistantMessage({
   return (
     <div className="group flex w-full flex-col gap-1.5">
       {!isCollapsedBlock && (
-          <div className="text-muted-foreground/60 flex items-center justify-between gap-2 px-1 text-xs opacity-70">
+        <div className="text-muted-foreground/60 flex items-center justify-between gap-2 px-1 text-xs opacity-70">
           <div className="flex items-center gap-2">
             <span>PicoClaw</span>
             {trimmedModelName && (
@@ -276,4 +276,4 @@ export function AssistantMessage({
       )}
     </div>
   )
-}
+})

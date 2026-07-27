@@ -1,4 +1,5 @@
 import { IconCheck, IconCopy } from "@tabler/icons-react"
+import { memo } from "react"
 import { useTranslation } from "react-i18next"
 
 import { FileAttachmentList } from "@/components/chat/file-attachment-list"
@@ -14,7 +15,7 @@ interface UserMessageProps {
   timestamp?: string | number
 }
 
-export function UserMessage({
+export const UserMessage = memo(function UserMessage({
   content,
   attachments = [],
   timestamp = "",
@@ -111,4 +112,4 @@ export function UserMessage({
       )}
     </div>
   )
-}
+})
