@@ -474,17 +474,26 @@ func computeConfigSignature(cfg *config.Config) string {
 	if cfg.Tools.SendFile.Enabled {
 		toolSignatures = append(toolSignatures, "send_file")
 	}
+	if cfg.Tools.SendTTS.Enabled {
+		toolSignatures = append(toolSignatures, "send_tts")
+	}
 	if cfg.Tools.ImageGenerate.Enabled {
 		toolSignatures = append(toolSignatures, fmt.Sprintf(
 			"image_generate:%d",
 			cfg.Tools.ImageGenerate.GetMaxCount(),
 		))
 	}
+	if cfg.Tools.LoadImage.Enabled {
+		toolSignatures = append(toolSignatures, "load_image")
+	}
 	if cfg.Tools.FindSkills.Enabled {
 		toolSignatures = append(toolSignatures, "find_skills")
 	}
 	if cfg.Tools.InstallSkill.Enabled {
 		toolSignatures = append(toolSignatures, "install_skill")
+	}
+	if cfg.Tools.Subagent.Enabled {
+		toolSignatures = append(toolSignatures, "subagent")
 	}
 	if cfg.Tools.Spawn.Enabled {
 		toolSignatures = append(toolSignatures, "spawn")
@@ -497,6 +506,9 @@ func computeConfigSignature(cfg *config.Config) string {
 	}
 	if cfg.Tools.SPI.Enabled {
 		toolSignatures = append(toolSignatures, "spi")
+	}
+	if cfg.Tools.Serial.Enabled {
+		toolSignatures = append(toolSignatures, "serial")
 	}
 	if cfg.Tools.MCP.Enabled {
 		toolSignatures = append(toolSignatures, "mcp")

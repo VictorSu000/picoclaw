@@ -26,6 +26,7 @@ func TestHandleListTools(t *testing.T) {
 	cfg.Tools.Skills.Enabled = true
 	cfg.Tools.Spawn.Enabled = true
 	cfg.Tools.Subagent.Enabled = false
+	cfg.Tools.SendTTS.Enabled = true
 	cfg.Tools.MCP.Enabled = true
 	cfg.Tools.MCP.Discovery.Enabled = true
 	cfg.Tools.MCP.Discovery.UseRegex = true
@@ -67,8 +68,26 @@ func TestHandleListTools(t *testing.T) {
 	if gotTools["spawn"].Status != "blocked" || gotTools["spawn"].ReasonCode != "requires_subagent" {
 		t.Fatalf("spawn = %#v, want blocked/requires_subagent", gotTools["spawn"])
 	}
+	if gotTools["subagent"].Status != "disabled" || !gotTools["subagent"].Configurable || !gotTools["subagent"].PresetSelectable {
+		t.Fatalf("subagent = %#v, want disabled/configurable/preset_selectable", gotTools["subagent"])
+	}
 	if gotTools["find_skills"].Status != "enabled" {
 		t.Fatalf("find_skills status = %q, want enabled", gotTools["find_skills"].Status)
+	}
+	if gotTools["send_tts"].Status != "blocked" || gotTools["send_tts"].ReasonCode != "requires_tts_provider" {
+		t.Fatalf("send_tts = %#v, want blocked/requires_tts_provider", gotTools["send_tts"])
+	}
+	if gotTools["load_image"].Status != "disabled" || !gotTools["load_image"].Configurable {
+		t.Fatalf("load_image = %#v, want disabled/configurable", gotTools["load_image"])
+	}
+	if gotTools["delegate"].Status != "blocked" || gotTools["delegate"].ReasonCode != "requires_multi_agent" {
+		t.Fatalf("delegate = %#v, want blocked/requires_multi_agent", gotTools["delegate"])
+	}
+	if gotTools["delegate"].Configurable || !gotTools["delegate"].PresetSelectable {
+		t.Fatalf("delegate flags = %#v, want non-configurable but preset selectable", gotTools["delegate"])
+	}
+	if gotTools["reaction"].Status != "enabled" || gotTools["reaction"].Configurable || !gotTools["reaction"].PresetSelectable {
+		t.Fatalf("reaction = %#v, want enabled/non-configurable/preset_selectable", gotTools["reaction"])
 	}
 	if gotTools["tool_search_tool_regex"].Status != "enabled" {
 		t.Fatalf("tool_search_tool_regex status = %q, want enabled", gotTools["tool_search_tool_regex"].Status)
@@ -170,6 +189,8 @@ func TestHandleUpdateToolState(t *testing.T) {
 	}
 	cfg.Tools.Spawn.Enabled = false
 	cfg.Tools.Subagent.Enabled = false
+	cfg.Tools.LoadImage.Enabled = false
+	cfg.Tools.SendTTS.Enabled = false
 	cfg.Tools.Cron.Enabled = false
 	cfg.Tools.MCP.Enabled = false
 	cfg.Tools.MCP.Discovery.Enabled = false
@@ -251,6 +272,41 @@ func TestHandleUpdateToolState(t *testing.T) {
 	}
 	if !updated.Tools.Serial.Enabled {
 		t.Fatalf("serial should be enabled: %#v", updated.Tools.Serial)
+	}
+
+	rec5 := httptest.NewRecorder()
+	req5 := httptest.NewRequest(
+		http.MethodPut,
+		"/api/tools/load_image/state",
+		bytes.NewBufferString(`{"enabled":true}`),
+	)
+	req5.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec5, req5)
+	if rec5.Code != http.StatusOK {
+		t.Fatalf("load_image status = %d, want %d, body=%s", rec5.Code, http.StatusOK, rec5.Body.String())
+	}
+
+	rec6 := httptest.NewRecorder()
+	req6 := httptest.NewRequest(
+		http.MethodPut,
+		"/api/tools/subagent/state",
+		bytes.NewBufferString(`{"enabled":true}`),
+	)
+	req6.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec6, req6)
+	if rec6.Code != http.StatusOK {
+		t.Fatalf("subagent status = %d, want %d, body=%s", rec6.Code, http.StatusOK, rec6.Body.String())
+	}
+
+	updated, err = config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig(updated extra tools) error = %v", err)
+	}
+	if !updated.Tools.LoadImage.Enabled {
+		t.Fatalf("load_image should be enabled: %#v", updated.Tools.LoadImage)
+	}
+	if !updated.Tools.Subagent.Enabled {
+		t.Fatalf("subagent should be enabled: %#v", updated.Tools.Subagent)
 	}
 }
 

@@ -19,6 +19,10 @@ import { cn } from "@/lib/utils"
 import { ToolStatusBadge } from "./tool-status-badge"
 import type { GroupedTools, ToolStatusFilter } from "./types"
 
+function fallbackReasonLabel(reasonCode: string) {
+  return reasonCode.replaceAll("_", " ")
+}
+
 interface ToolLibraryTabProps {
   allTools: ToolSupportItem[]
   groupedTools: GroupedTools
@@ -160,12 +164,16 @@ function ToolCard({
 }) {
   const { t } = useTranslation()
   const reasonText = tool.reason_code
-    ? t(`pages.agent.tools.reasons.${tool.reason_code}`)
+    ? t(
+        `pages.agent.tools.reasons.${tool.reason_code}`,
+        fallbackReasonLabel(tool.reason_code),
+      )
     : ""
   const isEnabled = tool.status === "enabled"
   const isToggledOn = tool.status !== "disabled"
   const isDisabled = tool.status === "disabled"
   const isBlocked = tool.status === "blocked"
+  const isConfigurable = tool.configurable
   const isWebSearchTool = tool.name === "web_search"
 
   return (
@@ -202,15 +210,21 @@ function ToolCard({
                 <IconSettings className="size-4" />
               </Button>
             )}
-            <Switch
-              checked={isToggledOn}
-              disabled={isPending}
-              onCheckedChange={(checked) => onToggleTool(tool.name, checked)}
-              className={cn(
-                "shrink-0",
-                isEnabled && "shadow-xs ring-1 ring-emerald-500/20",
-              )}
-            />
+            {isConfigurable ? (
+              <Switch
+                checked={isToggledOn}
+                disabled={isPending}
+                onCheckedChange={(checked) => onToggleTool(tool.name, checked)}
+                className={cn(
+                  "shrink-0",
+                  isEnabled && "shadow-xs ring-1 ring-emerald-500/20",
+                )}
+              />
+            ) : (
+              <span className="text-muted-foreground rounded-md border px-2 py-1 text-[11px] font-medium">
+                {t("pages.agent.tools.automatic", "Automatic")}
+              </span>
+            )}
           </div>
         </div>
 

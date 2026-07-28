@@ -793,6 +793,7 @@
           "disabled": "Disabled",
           "blocked": "Blocked"
         },
+        "automatic": "Automatic",
         "categories": {
           "automation": "Automation",
           "filesystem": "Filesystem",
@@ -805,9 +806,11 @@
         },
         "reasons": {
           "requires_linux": "This tool only works on Linux hosts with the required device files exposed.",
+          "requires_multi_agent": "Configure at least two agents before delegation becomes available.",
           "requires_serial_platform": "This tool currently supports Linux, macOS, and Windows hosts with accessible serial ports.",
           "requires_skills": "Enable `tools.skills` before this skill-registry tool can be used.",
           "requires_subagent": "Enable `tools.subagent` before the spawn tool can delegate work.",
+          "requires_tts_provider": "Configure a TTS-capable model or voice provider before enabling spoken replies.",
           "requires_mcp_discovery": "Enable `tools.mcp.discovery` before MCP discovery tools become available.",
           "requires_web_search_provider": "Configure at least one ready external web-search provider."
         }

@@ -7,24 +7,29 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/sipeed/picoclaw/pkg/audio/tts"
 	"github.com/sipeed/picoclaw/pkg/config"
 	picotools "github.com/sipeed/picoclaw/pkg/tools"
 )
 
 type toolCatalogEntry struct {
-	Name        string
-	Description string
-	Category    string
-	ConfigKey   string
+	Name             string
+	Description      string
+	Category         string
+	ConfigKey        string
+	Configurable     bool
+	PresetSelectable bool
 }
 
 type toolSupportItem struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Category    string `json:"category"`
-	ConfigKey   string `json:"config_key"`
-	Status      string `json:"status"`
-	ReasonCode  string `json:"reason_code,omitempty"`
+	Name             string `json:"name"`
+	Description      string `json:"description"`
+	Category         string `json:"category"`
+	ConfigKey        string `json:"config_key"`
+	Configurable     bool   `json:"configurable"`
+	PresetSelectable bool   `json:"preset_selectable"`
+	Status           string `json:"status"`
+	ReasonCode       string `json:"reason_code,omitempty"`
 }
 
 type toolSupportResponse struct {
@@ -71,130 +76,210 @@ type webSearchConfigRequest struct {
 
 var toolCatalog = []toolCatalogEntry{
 	{
-		Name:        "read_file",
-		Description: "Read file content from the workspace or explicitly allowed paths.",
-		Category:    "filesystem",
-		ConfigKey:   "read_file",
+		Name:             "read_file",
+		Description:      "Read file content from the workspace or explicitly allowed paths.",
+		Category:         "filesystem",
+		ConfigKey:        "read_file",
+		Configurable:     true,
+		PresetSelectable: true,
 	},
 	{
-		Name:        "write_file",
-		Description: "Create or overwrite files within the writable workspace scope.",
-		Category:    "filesystem",
-		ConfigKey:   "write_file",
+		Name:             "write_file",
+		Description:      "Create or overwrite files within the writable workspace scope.",
+		Category:         "filesystem",
+		ConfigKey:        "write_file",
+		Configurable:     true,
+		PresetSelectable: true,
 	},
 	{
-		Name:        "list_dir",
-		Description: "Inspect directories and enumerate files available to the agent.",
-		Category:    "filesystem",
-		ConfigKey:   "list_dir",
+		Name:             "list_dir",
+		Description:      "Inspect directories and enumerate files available to the agent.",
+		Category:         "filesystem",
+		ConfigKey:        "list_dir",
+		Configurable:     true,
+		PresetSelectable: true,
 	},
 	{
-		Name:        "edit_file",
-		Description: "Apply targeted edits to existing files without rewriting everything.",
-		Category:    "filesystem",
-		ConfigKey:   "edit_file",
+		Name:             "edit_file",
+		Description:      "Apply targeted edits to existing files without rewriting everything.",
+		Category:         "filesystem",
+		ConfigKey:        "edit_file",
+		Configurable:     true,
+		PresetSelectable: true,
 	},
 	{
-		Name:        "append_file",
-		Description: "Append content to the end of an existing file.",
-		Category:    "filesystem",
-		ConfigKey:   "append_file",
+		Name:             "append_file",
+		Description:      "Append content to the end of an existing file.",
+		Category:         "filesystem",
+		ConfigKey:        "append_file",
+		Configurable:     true,
+		PresetSelectable: true,
 	},
 	{
-		Name:        "exec",
-		Description: "Run shell commands inside the configured workspace sandbox.",
-		Category:    "filesystem",
-		ConfigKey:   "exec",
+		Name:             "exec",
+		Description:      "Run shell commands inside the configured workspace sandbox.",
+		Category:         "filesystem",
+		ConfigKey:        "exec",
+		Configurable:     true,
+		PresetSelectable: true,
 	},
 	{
-		Name:        "cron",
-		Description: "Schedule one-time or recurring reminders, jobs, and shell commands.",
-		Category:    "automation",
-		ConfigKey:   "cron",
+		Name:             "cron",
+		Description:      "Schedule one-time or recurring reminders, jobs, and shell commands.",
+		Category:         "automation",
+		ConfigKey:        "cron",
+		Configurable:     true,
+		PresetSelectable: true,
 	},
 	{
-		Name:        "web_search",
-		Description: "Search the web using the configured providers.",
-		Category:    "web",
-		ConfigKey:   "web",
+		Name:             "web_search",
+		Description:      "Search the web using the configured providers.",
+		Category:         "web",
+		ConfigKey:        "web",
+		Configurable:     true,
+		PresetSelectable: true,
 	},
 	{
-		Name:        "web_fetch",
-		Description: "Fetch and summarize the contents of a webpage.",
-		Category:    "web",
-		ConfigKey:   "web_fetch",
+		Name:             "web_fetch",
+		Description:      "Fetch and summarize the contents of a webpage.",
+		Category:         "web",
+		ConfigKey:        "web_fetch",
+		Configurable:     true,
+		PresetSelectable: true,
 	},
 	{
-		Name:        "message",
-		Description: "Send a follow-up message back to the active user or chat.",
-		Category:    "communication",
-		ConfigKey:   "message",
+		Name:             "message",
+		Description:      "Send a follow-up message back to the active user or chat.",
+		Category:         "communication",
+		ConfigKey:        "message",
+		Configurable:     true,
+		PresetSelectable: true,
 	},
 	{
-		Name:        "send_file",
-		Description: "Send an outbound file or media attachment to the active chat.",
-		Category:    "communication",
-		ConfigKey:   "send_file",
+		Name:             "reaction",
+		Description:      "React to the active message when the current channel supports reactions.",
+		Category:         "communication",
+		Configurable:     false,
+		PresetSelectable: true,
 	},
 	{
-		Name:        "image_generate",
-		Description: "Generate or edit images using the configured image generation model.",
-		Category:    "vision",
-		ConfigKey:   "image_generate",
+		Name:             "send_file",
+		Description:      "Send an outbound file or media attachment to the active chat.",
+		Category:         "communication",
+		ConfigKey:        "send_file",
+		Configurable:     true,
+		PresetSelectable: true,
 	},
 	{
-		Name:        "find_skills",
-		Description: "Search external skill registries for installable skills.",
-		Category:    "skills",
-		ConfigKey:   "find_skills",
+		Name:             "send_tts",
+		Description:      "Synthesize spoken audio and send it back to the active chat.",
+		Category:         "communication",
+		ConfigKey:        "send_tts",
+		Configurable:     true,
+		PresetSelectable: true,
 	},
 	{
-		Name:        "install_skill",
-		Description: "Install a skill into the current workspace from a registry.",
-		Category:    "skills",
-		ConfigKey:   "install_skill",
+		Name:             "image_generate",
+		Description:      "Generate or edit images using the configured image generation model.",
+		Category:         "vision",
+		ConfigKey:        "image_generate",
+		Configurable:     true,
+		PresetSelectable: true,
 	},
 	{
-		Name:        "spawn",
-		Description: "Launch a background subagent for long-running or delegated work.",
-		Category:    "agents",
-		ConfigKey:   "spawn",
+		Name:             "load_image",
+		Description:      "Load an image into the current turn for multimodal reasoning and follow-up tools.",
+		Category:         "vision",
+		ConfigKey:        "load_image",
+		Configurable:     true,
+		PresetSelectable: true,
 	},
 	{
-		Name:        "spawn_status",
-		Description: "Query the status of spawned subagents.",
-		Category:    "agents",
-		ConfigKey:   "spawn_status",
+		Name:             "find_skills",
+		Description:      "Search external skill registries for installable skills.",
+		Category:         "skills",
+		ConfigKey:        "find_skills",
+		Configurable:     true,
+		PresetSelectable: true,
 	},
 	{
-		Name:        "i2c",
-		Description: "Interact with I2C hardware devices exposed on the host.",
-		Category:    "hardware",
-		ConfigKey:   "i2c",
+		Name:             "install_skill",
+		Description:      "Install a skill into the current workspace from a registry.",
+		Category:         "skills",
+		ConfigKey:        "install_skill",
+		Configurable:     true,
+		PresetSelectable: true,
 	},
 	{
-		Name:        "spi",
-		Description: "Interact with SPI hardware devices exposed on the host.",
-		Category:    "hardware",
-		ConfigKey:   "spi",
+		Name:             "subagent",
+		Description:      "Run a synchronous subagent task and return the result in the current turn.",
+		Category:         "agents",
+		ConfigKey:        "subagent",
+		Configurable:     true,
+		PresetSelectable: true,
 	},
 	{
-		Name:        "serial",
-		Description: "Interact with serial ports exposed on the host.",
-		Category:    "hardware",
-		ConfigKey:   "serial",
+		Name:             "spawn",
+		Description:      "Launch a background subagent for long-running or delegated work.",
+		Category:         "agents",
+		ConfigKey:        "spawn",
+		Configurable:     true,
+		PresetSelectable: true,
 	},
 	{
-		Name:        "tool_search_tool_regex",
-		Description: "Discover hidden MCP tools by regex search when tool discovery is enabled.",
-		Category:    "discovery",
-		ConfigKey:   "mcp.discovery.use_regex",
+		Name:             "spawn_status",
+		Description:      "Query the status of spawned subagents.",
+		Category:         "agents",
+		ConfigKey:        "spawn_status",
+		Configurable:     true,
+		PresetSelectable: true,
 	},
 	{
-		Name:        "tool_search_tool_bm25",
-		Description: "Discover hidden MCP tools by semantic ranking when tool discovery is enabled.",
-		Category:    "discovery",
-		ConfigKey:   "mcp.discovery.use_bm25",
+		Name:             "delegate",
+		Description:      "Delegate a task to a named peer agent and wait for its result.",
+		Category:         "agents",
+		Configurable:     false,
+		PresetSelectable: true,
+	},
+	{
+		Name:             "i2c",
+		Description:      "Interact with I2C hardware devices exposed on the host.",
+		Category:         "hardware",
+		ConfigKey:        "i2c",
+		Configurable:     true,
+		PresetSelectable: true,
+	},
+	{
+		Name:             "spi",
+		Description:      "Interact with SPI hardware devices exposed on the host.",
+		Category:         "hardware",
+		ConfigKey:        "spi",
+		Configurable:     true,
+		PresetSelectable: true,
+	},
+	{
+		Name:             "serial",
+		Description:      "Interact with serial ports exposed on the host.",
+		Category:         "hardware",
+		ConfigKey:        "serial",
+		Configurable:     true,
+		PresetSelectable: true,
+	},
+	{
+		Name:             "tool_search_tool_regex",
+		Description:      "Discover hidden MCP tools by regex search when tool discovery is enabled.",
+		Category:         "discovery",
+		ConfigKey:        "mcp.discovery.use_regex",
+		Configurable:     true,
+		PresetSelectable: true,
+	},
+	{
+		Name:             "tool_search_tool_bm25",
+		Description:      "Discover hidden MCP tools by semantic ranking when tool discovery is enabled.",
+		Category:         "discovery",
+		ConfigKey:        "mcp.discovery.use_bm25",
+		Configurable:     true,
+		PresetSelectable: true,
 	},
 }
 
@@ -261,6 +346,12 @@ func buildToolSupport(cfg *config.Config) []toolSupportItem {
 					reasonCode = "requires_skills"
 				}
 			}
+		case "send_tts":
+			status, reasonCode = resolveTTSToolSupport(cfg)
+		case "subagent":
+			if cfg.Tools.IsToolEnabled("subagent") {
+				status = "enabled"
+			}
 		case "spawn", "spawn_status":
 			if cfg.Tools.IsToolEnabled(entry.ConfigKey) {
 				if cfg.Tools.IsToolEnabled("subagent") {
@@ -270,6 +361,10 @@ func buildToolSupport(cfg *config.Config) []toolSupportItem {
 					reasonCode = "requires_subagent"
 				}
 			}
+		case "delegate":
+			status, reasonCode = resolveDelegateToolSupport(cfg)
+		case "reaction":
+			status = "enabled"
 		case "tool_search_tool_regex":
 			status, reasonCode = resolveDiscoveryToolSupport(cfg, cfg.Tools.MCP.Discovery.UseRegex)
 		case "tool_search_tool_bm25":
@@ -287,12 +382,14 @@ func buildToolSupport(cfg *config.Config) []toolSupportItem {
 		}
 
 		items = append(items, toolSupportItem{
-			Name:        entry.Name,
-			Description: entry.Description,
-			Category:    entry.Category,
-			ConfigKey:   entry.ConfigKey,
-			Status:      status,
-			ReasonCode:  reasonCode,
+			Name:             entry.Name,
+			Description:      entry.Description,
+			Category:         entry.Category,
+			ConfigKey:        entry.ConfigKey,
+			Configurable:     entry.Configurable,
+			PresetSelectable: entry.PresetSelectable,
+			Status:           status,
+			ReasonCode:       reasonCode,
 		})
 	}
 	return items
@@ -318,6 +415,30 @@ func resolveSerialToolSupport(enabled bool) (string, string) {
 	default:
 		return "blocked", "requires_serial_platform"
 	}
+}
+
+func resolveTTSToolSupport(cfg *config.Config) (string, string) {
+	if cfg == nil || !cfg.Tools.IsToolEnabled("send_tts") {
+		return "disabled", ""
+	}
+	if tts.DetectTTS(cfg) == nil {
+		return "blocked", "requires_tts_provider"
+	}
+	return "enabled", ""
+}
+
+func resolveDelegateToolSupport(cfg *config.Config) (string, string) {
+	if configuredAgentCount(cfg) <= 1 {
+		return "blocked", "requires_multi_agent"
+	}
+	return "enabled", ""
+}
+
+func configuredAgentCount(cfg *config.Config) int {
+	if cfg == nil || len(cfg.Agents.List) == 0 {
+		return 1
+	}
+	return len(cfg.Agents.List)
 }
 
 func resolveDiscoveryToolSupport(cfg *config.Config, methodEnabled bool) (string, string) {
@@ -364,6 +485,8 @@ func applyToolState(cfg *config.Config, toolName string, enabled bool) error {
 		cfg.Tools.Message.Enabled = enabled
 	case "send_file":
 		cfg.Tools.SendFile.Enabled = enabled
+	case "send_tts":
+		cfg.Tools.SendTTS.Enabled = enabled
 	case "find_skills":
 		cfg.Tools.FindSkills.Enabled = enabled
 		if enabled {
@@ -379,6 +502,8 @@ func applyToolState(cfg *config.Config, toolName string, enabled bool) error {
 		if enabled {
 			cfg.Tools.Subagent.Enabled = true
 		}
+	case "subagent":
+		cfg.Tools.Subagent.Enabled = enabled
 	case "spawn_status":
 		cfg.Tools.SpawnStatus.Enabled = enabled
 		if enabled {
@@ -387,6 +512,8 @@ func applyToolState(cfg *config.Config, toolName string, enabled bool) error {
 		}
 	case "image_generate":
 		cfg.Tools.ImageGenerate.Enabled = enabled
+	case "load_image":
+		cfg.Tools.LoadImage.Enabled = enabled
 	case "i2c":
 		cfg.Tools.I2C.Enabled = enabled
 	case "spi":

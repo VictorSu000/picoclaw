@@ -320,11 +320,13 @@ func registerSharedTools(
 			}
 		}
 
-		// Spawn and spawn_status tools share a SubagentManager.
-		// Construct it when either tool is enabled (both require subagent).
+		// Subagent, spawn, and spawn_status share a SubagentManager.
+		// Construct it whenever subagent support is enabled so the synchronous
+		// subagent tool can also be used on its own.
+		subagentEnabled := cfg.Tools.IsToolEnabled("subagent")
 		spawnEnabled := cfg.Tools.IsToolEnabled("spawn")
 		spawnStatusEnabled := cfg.Tools.IsToolEnabled("spawn_status")
-		if (spawnEnabled || spawnStatusEnabled) && cfg.Tools.IsToolEnabled("subagent") {
+		if subagentEnabled {
 			// The manager normally delegates to AgentLoop sub-turns. Its legacy
 			// direct-provider fallback must honor the same model RPM as well.
 			subagentProvider := withCandidateRateLimit(provider, fallback, agent.Candidates)
@@ -401,9 +403,13 @@ func registerSharedTools(
 
 			// Clone the parent's tool registry so subagents can use all
 			// tools registered so far (file, web, etc.) but NOT spawn/
-			// spawn_status which are added below — preventing recursive
-			// subagent spawning.
+			// spawn_status/subagent/delegate which are added below — preventing
+			// recursive subagent spawning.
 			subagentManager.SetTools(agent.Tools.Clone())
+			subagentTool := tools.NewSubagentTool(subagentManager)
+			subagentTool.SetSpawner(NewSubTurnSpawner(al))
+			agent.Tools.Register(subagentTool)
+
 			if spawnEnabled {
 				spawnTool := tools.NewSpawnTool(subagentManager)
 				spawnTool.SetSpawner(NewSubTurnSpawner(al))
@@ -413,16 +419,11 @@ func registerSharedTools(
 				})
 
 				agent.Tools.Register(spawnTool)
-
-				// Also register the synchronous subagent tool
-				subagentTool := tools.NewSubagentTool(subagentManager)
-				subagentTool.SetSpawner(NewSubTurnSpawner(al))
-				agent.Tools.Register(subagentTool)
 			}
 			if spawnStatusEnabled {
 				agent.Tools.Register(tools.NewSpawnStatusTool(subagentManager))
 			}
-		} else if (spawnEnabled || spawnStatusEnabled) && !cfg.Tools.IsToolEnabled("subagent") {
+		} else if spawnEnabled || spawnStatusEnabled {
 			logger.WarnCF("agent", "spawn/spawn_status tools require subagent to be enabled", nil)
 		}
 

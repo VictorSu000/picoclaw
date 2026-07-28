@@ -388,6 +388,30 @@ func TestNewAgentLoop_DoesNotRegisterWebSearchTool_WhenNoReadyProviders(t *testi
 	}
 }
 
+func TestNewAgentLoop_RegistersSubagentToolWithoutSpawn(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Workspace = t.TempDir()
+	cfg.Tools.Subagent.Enabled = true
+	cfg.Tools.Spawn.Enabled = false
+	cfg.Tools.SpawnStatus.Enabled = false
+
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &mockProvider{})
+
+	agent := al.registry.GetDefaultAgent()
+	if agent == nil {
+		t.Fatal("expected default agent")
+	}
+	if _, ok := agent.Tools.Get("subagent"); !ok {
+		t.Fatal("expected subagent tool to be registered")
+	}
+	if _, ok := agent.Tools.Get("spawn"); ok {
+		t.Fatal("did not expect spawn tool when spawn is disabled")
+	}
+	if _, ok := agent.Tools.Get("spawn_status"); ok {
+		t.Fatal("did not expect spawn_status tool when spawn_status is disabled")
+	}
+}
+
 func TestPublishResponseIfNeeded_DismissesToolFeedbackWhenMessageToolAlreadySent(t *testing.T) {
 	al, msgBus, provider, sessions, cleanup := newTestAgentLoop(t)
 	defer cleanup()

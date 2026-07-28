@@ -5,6 +5,8 @@ export interface ToolSupportItem {
   description: string
   category: string
   config_key: string
+  configurable: boolean
+  preset_selectable: boolean
   status: "enabled" | "disabled" | "blocked"
   reason_code?: string
 }

@@ -793,6 +793,7 @@
           "disabled": "已禁用",
           "blocked": "被阻塞"
         },
+        "automatic": "自动管理",
         "categories": {
           "automation": "自动化",
           "filesystem": "文件系统",
@@ -805,9 +806,11 @@
         },
         "reasons": {
           "requires_linux": "该工具仅在 Linux 主机上可用，并且需要暴露对应的设备文件。",
+          "requires_multi_agent": "至少需要配置两个 agent，委派工具才会可用。",
           "requires_serial_platform": "该工具当前支持 Linux、macOS 和 Windows，且要求主机可访问对应串口。",
           "requires_skills": "需要先启用 `tools.skills`，该技能注册表工具才能使用。",
           "requires_subagent": "需要先启用 `tools.subagent`，`spawn` 才能委派任务。",
+          "requires_tts_provider": "请先配置支持 TTS 的模型或语音 provider，才能启用语音回复工具。",
           "requires_mcp_discovery": "需要先启用 `tools.mcp.discovery`，MCP 发现工具才会可用。",
           "requires_web_search_provider": "请至少配置一个可用的外部网络搜索 provider。"
         }

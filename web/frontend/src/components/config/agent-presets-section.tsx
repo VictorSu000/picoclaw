@@ -142,16 +142,16 @@ export function AgentPresetsSection({
         .map((model) => model.model_name),
     ),
   ).sort((left, right) => left.localeCompare(right))
-  const toolOptions: MultiSelectOption[] = (toolsData?.tools ?? []).map(
-    (tool) => ({
+  const toolOptions: MultiSelectOption[] = (toolsData?.tools ?? [])
+    .filter((tool) => tool.preset_selectable)
+    .map((tool) => ({
       value: tool.name,
       disabled: tool.status !== "enabled",
       description:
         tool.status === "enabled"
           ? tool.description
           : `${tool.description} (${tool.status})`,
-    }),
-  )
+    }))
   const skillOptions: MultiSelectOption[] = (skillsData?.skills ?? []).map(
     (skill) => ({
       value: skill.name,
