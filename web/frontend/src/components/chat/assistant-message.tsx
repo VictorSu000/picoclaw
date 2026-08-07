@@ -88,6 +88,22 @@ export const AssistantMessage = memo(function AssistantMessage({
               </>
             )}
           </div>
+          {hasText && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="hover:bg-transparent hover:text-foreground h-6 w-6 opacity-60 md:hidden"
+              onClick={() => void copy(content)}
+              aria-label={copyMessageLabel}
+              title={copyMessageLabel}
+            >
+              {isCopied ? (
+                <IconCheck className="h-3.5 w-3.5 text-green-500" />
+              ) : (
+                <IconCopy className="h-3.5 w-3.5" />
+              )}
+            </Button>
+          )}
         </div>
       )}
 

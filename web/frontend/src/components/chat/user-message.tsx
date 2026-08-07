@@ -106,9 +106,28 @@ export const UserMessage = memo(function UserMessage({
       )}
 
       {formattedTimestamp && (
-        <span className="px-1 text-[12px] text-zinc-400">
-          {formattedTimestamp}
-        </span>
+        <div className="flex items-center gap-1 px-1">
+          <span className="text-[12px] text-zinc-400">
+            {formattedTimestamp}
+          </span>
+          {hasText && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="hover:bg-transparent text-zinc-400 hover:text-foreground h-6 w-6 md:hidden"
+              onClick={() => void copy(content)}
+              aria-label={copyMessageLabel}
+              title={copyMessageLabel}
+            >
+              {isCopied ? (
+                <IconCheck className="h-3.5 w-3.5 text-green-500" />
+              ) : (
+                <IconCopy className="h-3.5 w-3.5" />
+              )}
+            </Button>
+          )}
+        </div>
       )}
     </div>
   )
