@@ -499,9 +499,9 @@ func TestEstimateMessageTokens_ReasoningContent(t *testing.T) {
 	plainTokens := EstimateMessageTokens(plain)
 	reasoningTokens := EstimateMessageTokens(withReasoning)
 
-	if reasoningTokens <= plainTokens {
-		t.Errorf("message with ReasoningContent (%d tokens) should exceed plain message (%d tokens)",
-			reasoningTokens, plainTokens)
+	if reasoningTokens != plainTokens {
+		t.Errorf("ReasoningContent should not affect token estimate: plain=%d, withReasoning=%d",
+			plainTokens, reasoningTokens)
 	}
 }
 
@@ -772,19 +772,18 @@ func TestEstimateMessageTokens_WithReasoningAndMedia(t *testing.T) {
 
 	tokens := EstimateMessageTokens(msg)
 
-	// ReasoningContent alone is ~1700 chars → ~680 tokens.
-	// Content + TC + overhead adds more. Should be well above 500.
-	if tokens < 500 {
-		t.Errorf("message with reasoning+toolcalls should have significant tokens, got %d", tokens)
+	// Content + TC + overhead should be meaningful.
+	if tokens < 20 {
+		t.Errorf("message with content+toolcalls should have significant tokens, got %d", tokens)
 	}
 
-	// Compare without reasoning to ensure it's counted.
+	// ReasoningContent must NOT affect token count — providers strip it before sending.
 	msgNoReasoning := msg
 	msgNoReasoning.ReasoningContent = ""
 	tokensNoReasoning := EstimateMessageTokens(msgNoReasoning)
 
-	if tokens <= tokensNoReasoning {
-		t.Errorf("reasoning content should add tokens: with=%d, without=%d", tokens, tokensNoReasoning)
+	if tokens != tokensNoReasoning {
+		t.Errorf("ReasoningContent should not affect token estimate: with=%d, without=%d", tokens, tokensNoReasoning)
 	}
 }
 
