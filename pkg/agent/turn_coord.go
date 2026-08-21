@@ -601,6 +601,54 @@ func (al *AgentLoop) askSideQuestion(
 		return "", nil
 	}
 
+	// Retry for empty response (no content, no reasoning, no tool calls)
+	if isLLMResponseEmpty(resp) {
+		maxRetries := al.GetConfig().Agents.Defaults.MaxLLMRetries
+		if maxRetries <= 0 {
+			maxRetries = 2
+		}
+		backoffSecs := al.GetConfig().Agents.Defaults.LLMRetryBackoffSecs
+		if backoffSecs <= 0 {
+			backoffSecs = 2
+		}
+		for retry := 0; retry < maxRetries; retry++ {
+			backoff := time.Duration(retry+1) * time.Duration(backoffSecs) * time.Second
+			al.emitEvent(
+				runtimeevents.KindAgentLLMRetry,
+				HookMeta{
+					Source:      "askSideQuestion",
+					TracePath:   "turn.llm.retry",
+					turnContext: cloneTurnContext(turnCtx),
+				},
+				LLMRetryPayload{
+					Attempt:    retry + 1,
+					MaxRetries: maxRetries,
+					Reason:     "empty_response",
+					Error:      "LLM returned empty response",
+					Backoff:    backoff,
+				},
+			)
+			logger.WarnCF("agent", "Side question LLM returned empty response, retrying after backoff", map[string]any{
+				"reason":  "empty_response",
+				"retry":   retry,
+				"backoff": backoff.String(),
+			})
+			if sleepErr := sleepWithContext(ctx, backoff); sleepErr != nil {
+				return "", sleepErr
+			}
+			resp, err = callSideLLM(messages)
+			if err != nil {
+				return "", err
+			}
+			if resp == nil {
+				return "", nil
+			}
+			if !isLLMResponseEmpty(resp) {
+				break
+			}
+		}
+	}
+
 	// Apply after_llm hooks
 	if al.hooks != nil {
 		llmResp, decision := al.hooks.AfterLLM(ctx, &LLMHookResponse{

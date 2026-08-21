@@ -273,6 +273,38 @@ func (p *Pipeline) CallLLM(
 	for retry := 0; retry <= maxRetries; retry++ {
 		exec.response, err = callLLM(exec.callMessages, exec.providerToolDefs)
 		if err == nil {
+			// Check for empty response (no content, no reasoning, no tool calls)
+			// Only retry if no content was already streamed to the user
+			if exec.response != nil && isLLMResponseEmpty(exec.response) && exec.streamingPublisher == nil {
+				if retry < maxRetries {
+					backoff := time.Duration(retry+1) * time.Duration(backoffSecs) * time.Second
+					al.emitEvent(
+						runtimeevents.KindAgentLLMRetry,
+						ts.eventMeta("runTurn", "turn.llm.retry"),
+						LLMRetryPayload{
+							Attempt:    retry + 1,
+							MaxRetries: maxRetries,
+							Reason:     "empty_response",
+							Error:      "LLM returned empty response",
+							Backoff:    backoff,
+						},
+					)
+					logger.WarnCF("agent", "LLM returned empty response, retrying after backoff", map[string]any{
+						"reason":  "empty_response",
+						"retry":   retry,
+						"backoff": backoff.String(),
+					})
+					if sleepErr := sleepWithContext(turnCtx, backoff); sleepErr != nil {
+						if ts.hardAbortRequested() {
+							_ = ts.requestHardAbort()
+							return ControlBreak, nil
+						}
+						err = sleepErr
+						break
+					}
+					continue
+				}
+			}
 			break
 		}
 		if ts.hardAbortRequested() && errors.Is(err, context.Canceled) {
@@ -763,4 +795,33 @@ func transientLLMRetryReason(err error) (string, bool) {
 	}
 
 	return "", false
+}
+
+// isLLMResponseEmpty checks if an LLM response is empty (no content, no reasoning, no tool calls).
+func isLLMResponseEmpty(resp *providers.LLMResponse) bool {
+	if resp == nil {
+		return true
+	}
+	// Check if all meaningful fields are empty
+	if strings.TrimSpace(resp.Content) != "" {
+		return false
+	}
+	if strings.TrimSpace(resp.ReasoningContent) != "" {
+		return false
+	}
+	if strings.TrimSpace(resp.Reasoning) != "" {
+		return false
+	}
+	if len(resp.ToolCalls) > 0 {
+		return false
+	}
+	// Also check ReasoningDetails
+	if len(resp.ReasoningDetails) > 0 {
+		for _, detail := range resp.ReasoningDetails {
+			if strings.TrimSpace(detail.Text) != "" {
+				return false
+			}
+		}
+	}
+	return true
 }
