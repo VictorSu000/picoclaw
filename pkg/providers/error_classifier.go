@@ -204,6 +204,21 @@ func ClassifyError(err error, provider, model string) *FailoverError {
 			}
 		}
 	}
+	// In-band errors embedded in HTTP 200 bodies carry their own status code.
+	var inBandErr *common.InBandAPIError
+	if errors.As(err, &inBandErr) && inBandErr != nil {
+		if code := inBandErr.StatusCode(); code > 0 {
+			if reason := classifyByStatus(code); reason != "" {
+				return &FailoverError{
+					Reason:   reason,
+					Provider: provider,
+					Model:    model,
+					Status:   code,
+					Wrapped:  err,
+				}
+			}
+		}
+	}
 	if status := extractHTTPStatus(msg); status > 0 {
 		if reason := classifyByStatus(status); reason != "" {
 			return &FailoverError{

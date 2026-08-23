@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"syscall"
 	"testing"
+
+	"github.com/sipeed/picoclaw/pkg/providers/common"
 )
 
 type stubNetError struct {
@@ -19,6 +21,20 @@ type stubNetError struct {
 func (e stubNetError) Error() string   { return e.msg }
 func (e stubNetError) Timeout() bool   { return e.timeout }
 func (e stubNetError) Temporary() bool { return false }
+
+func TestClassifyError_InBandAPIError(t *testing.T) {
+	err := common.NewInBandAPIError("503", "503", "upstream_error")
+	result := ClassifyError(fmt.Errorf("wrapped: %w", err), "openai", "glm-5.2")
+	if result == nil {
+		t.Fatal("ClassifyError() = nil, want classified")
+	}
+	if result.Status != 503 {
+		t.Errorf("Status = %d, want 503", result.Status)
+	}
+	if result.Reason != FailoverTimeout {
+		t.Errorf("Reason = %q, want %q (server-side transient)", result.Reason, FailoverTimeout)
+	}
+}
 
 func TestClassifyError_Nil(t *testing.T) {
 	result := ClassifyError(nil, "openai", "gpt-4")

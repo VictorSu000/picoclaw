@@ -277,11 +277,19 @@ func ParseResponse(body io.Reader) (*LLMResponse, error) {
 			} `json:"message"`
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
-		Usage *UsageInfo `json:"usage"`
+		Usage *UsageInfo      `json:"usage"`
+		Error *InBandAPIError `json:"error"`
 	}
 
 	if err := json.NewDecoder(body).Decode(&apiResponse); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	// Some providers/gateways report upstream failures inside a 200 response
+	// (e.g. {"error":{"code":503,"type":"upstream_error"}}). Surface it so
+	// retry/fallback logic can act on it instead of returning an empty answer.
+	if apiResponse.Error != nil && InBandErrorPresent(apiResponse.Error) {
+		return nil, apiResponse.Error
 	}
 
 	if len(apiResponse.Choices) == 0 {
@@ -486,6 +494,101 @@ func WrapHTMLResponseError(statusCode int, body []byte, contentType, apiBase str
 		ContentType: contentType,
 		APIBase:     apiBase,
 		IsHTML:      true,
+	}
+}
+
+// InBandAPIError describes an error object embedded in an HTTP 200 response
+// body. Some gateways and providers report upstream failures (e.g.
+// {"error":{"code":503,"type":"upstream_error"}}) with a 200 status code;
+// without parsing the in-band field such responses look like successful but
+// empty completions and bypass retry/fallback logic.
+type InBandAPIError struct {
+	Code    any    `json:"code"`
+	Message string `json:"message"`
+	Type    string `json:"type"`
+}
+
+// StatusCode returns the numeric status code carried by the in-band error,
+// best-effort: numeric codes are used directly, numeric strings are parsed,
+// anything else yields 0 (unknown).
+func (e *InBandAPIError) StatusCode() int {
+	switch v := e.Code.(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	case string:
+		n := 0
+		for _, c := range strings.TrimSpace(v) {
+			if c < '0' || c > '9' {
+				return 0
+			}
+			n = n*10 + int(c-'0')
+		}
+		return n
+	default:
+		return 0
+	}
+}
+
+// Error implements the error interface, mirroring HTTPError's format so logs
+// stay consistent between transport-level and in-band failures.
+func (e *InBandAPIError) Error() string {
+	if e == nil {
+		return "API request failed"
+	}
+	if code := e.StatusCode(); code > 0 {
+		return fmt.Sprintf("API request failed:\n  Status: %d\n  Body:   %s", code, e.summary())
+	}
+	if s, ok := e.Code.(string); ok && strings.TrimSpace(s) != "" {
+		return fmt.Sprintf("API request failed:\n  Status: %s\n  Body:   %s", s, e.summary())
+	}
+	return fmt.Sprintf("API request failed:\n  Body:   %s", e.summary())
+}
+
+func (e *InBandAPIError) summary() string {
+	parts := make([]string, 0, 3)
+	if e.Type != "" {
+		parts = append(parts, "type="+e.Type)
+	}
+	if s, ok := e.Code.(string); ok && s != "" {
+		parts = append(parts, "code="+s)
+	}
+	if e.Message != "" {
+		parts = append(parts, e.Message)
+	}
+	if len(parts) == 0 {
+		return "<empty>"
+	}
+	return strings.Join(parts, " ")
+}
+
+// NewInBandAPIError builds the shared in-band error from decoded fields.
+func NewInBandAPIError(code any, message, errType string) *InBandAPIError {
+	return &InBandAPIError{Code: code, Message: message, Type: errType}
+}
+
+// InBandErrorPresent reports whether an in-band error object carries any
+// meaningful field. Guards against providers that emit empty/null error stubs
+// on successful responses.
+func InBandErrorPresent(e *InBandAPIError) bool {
+	if e == nil {
+		return false
+	}
+	if strings.TrimSpace(e.Message) != "" || strings.TrimSpace(e.Type) != "" {
+		return true
+	}
+	switch v := e.Code.(type) {
+	case nil:
+		return false
+	case float64:
+		return true
+	case int:
+		return true
+	case string:
+		return strings.TrimSpace(v) != ""
+	default:
+		return true
 	}
 }
 

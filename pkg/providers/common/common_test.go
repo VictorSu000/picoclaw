@@ -2,6 +2,7 @@ package common
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -320,6 +321,35 @@ func TestParseResponse_EmptyChoices(t *testing.T) {
 	}
 	if out.FinishReason != "stop" {
 		t.Errorf("FinishReason = %q, want %q", out.FinishReason, "stop")
+	}
+}
+
+func TestParseResponse_InBandError(t *testing.T) {
+	body := `{"choices":[{"delta":{"role":null,"content":""}}],"error":{"code":503,"message":"503","type":"upstream_error"},"id":"chatcmpl-020baf2944bf","model":"glm-5.2"}`
+	out, err := ParseResponse(strings.NewReader(body))
+	if err == nil {
+		t.Fatalf("ParseResponse() error = nil, want in-band error; response: %#v", out)
+	}
+	var inBandErr *InBandAPIError
+	if !errors.As(err, &inBandErr) {
+		t.Fatalf("ParseResponse() error = %v, want *InBandAPIError", err)
+	}
+	if got := inBandErr.StatusCode(); got != 503 {
+		t.Errorf("StatusCode() = %d, want 503", got)
+	}
+	if inBandErr.Type != "upstream_error" {
+		t.Errorf("Type = %q, want %q", inBandErr.Type, "upstream_error")
+	}
+}
+
+func TestParseResponse_NullErrorIgnored(t *testing.T) {
+	body := `{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"error":null}`
+	out, err := ParseResponse(strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("ParseResponse() error = %v, want nil", err)
+	}
+	if out.Content != "ok" {
+		t.Errorf("Content = %q, want %q", out.Content, "ok")
 	}
 }
 

@@ -273,10 +273,12 @@ func (p *Pipeline) CallLLM(
 	for retry := 0; retry <= maxRetries; retry++ {
 		exec.response, err = callLLM(exec.callMessages, exec.providerToolDefs)
 		if err == nil {
-			// Check for empty response (no content, no reasoning, no tool calls)
-			// Only retry if no content was already streamed to the user
-			if exec.response != nil && isLLMResponseEmpty(exec.response) && exec.streamingPublisher == nil {
+			// Check for empty response (no content, no reasoning, no tool calls).
+			// Retry regardless of streaming as long as nothing visible was already
+			// published to the user — an empty response never publishes output.
+			if exec.response != nil && isLLMResponseEmpty(exec.response) && !streamingPublisherVisible(exec.streamingPublisher) {
 				if retry < maxRetries {
+					cancelConfiguredStreamingLLM(turnCtx, exec)
 					backoff := time.Duration(retry+1) * time.Duration(backoffSecs) * time.Second
 					al.emitEvent(
 						runtimeevents.KindAgentLLMRetry,
@@ -304,6 +306,11 @@ func (p *Pipeline) CallLLM(
 					}
 					continue
 				}
+				logger.WarnCF("agent", "LLM returned empty response, retries exhausted", map[string]any{
+					"reason":  "empty_response",
+					"retries": retry,
+					"model":   exec.llmModel,
+				})
 			}
 			break
 		}
@@ -795,6 +802,13 @@ func transientLLMRetryReason(err error) (string, bool) {
 	}
 
 	return "", false
+}
+
+// streamingPublisherVisible reports whether a configured streaming publisher
+// already delivered visible output (content or reasoning) to the user.
+// An empty LLM response never publishes anything, so retries stay safe.
+func streamingPublisherVisible(publisher *streamingChunkPublisher) bool {
+	return publisher != nil && (publisher.Published() || publisher.ReasoningPublished())
 }
 
 // isLLMResponseEmpty checks if an LLM response is empty (no content, no reasoning, no tool calls).

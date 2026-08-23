@@ -668,11 +668,19 @@ func parseStreamResponse(
 				} `json:"delta"`
 				FinishReason *string `json:"finish_reason"`
 			} `json:"choices"`
-			Usage *UsageInfo `json:"usage"`
+			Usage *UsageInfo             `json:"usage"`
+			Error *common.InBandAPIError `json:"error"`
 		}
 
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			return fmt.Errorf("failed to decode stream event: %w", err)
+		}
+
+		// Some providers/gateways report upstream failures inside a 200 stream
+		// (e.g. {"error":{"code":503,"type":"upstream_error"}}). Surface it so
+		// retry/fallback logic can act on it instead of returning an empty answer.
+		if chunk.Error != nil && common.InBandErrorPresent(chunk.Error) {
+			return chunk.Error
 		}
 
 		if chunk.Usage != nil {

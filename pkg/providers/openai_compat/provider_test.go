@@ -3,6 +3,7 @@ package openai_compat
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -1550,6 +1551,37 @@ func TestProviderChatStream_CustomHeadersInjected(t *testing.T) {
 	}
 	if gotUserAgent != "Custom-UA/Stream" {
 		t.Fatalf("User-Agent = %q, want %q", gotUserAgent, "Custom-UA/Stream")
+	}
+}
+
+func TestProviderChatStream_InBandError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		// HTTP 200 with an upstream error embedded in the stream chunks.
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"role\":null,\"content\":\"\"}}],\"error\":{\"code\":503,\"message\":\"503\",\"type\":\"upstream_error\"},\"id\":\"chatcmpl-020baf2944bf\",\"model\":\"glm-5.2\"}\n\n"))
+		_, _ = w.Write([]byte("data: {\"p\":\"9b8c0c03\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"error\":{\"code\":503,\"message\":\"503\",\"type\":\"upstream_error\"},\"id\":\"chatcmpl-020baf2944bf\",\"object\":\"chat.completion.chunk\"}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	p := NewProvider("key", server.URL, "")
+	out, err := p.ChatStream(
+		t.Context(),
+		[]Message{{Role: "user", Content: "hi"}},
+		nil,
+		"glm-5.2",
+		nil,
+		nil,
+	)
+	if err == nil {
+		t.Fatalf("ChatStream() error = nil, want in-band error; response: %#v", out)
+	}
+	var inBandErr *common.InBandAPIError
+	if !errors.As(err, &inBandErr) {
+		t.Fatalf("ChatStream() error = %v, want *common.InBandAPIError", err)
+	}
+	if got := inBandErr.StatusCode(); got != 503 {
+		t.Errorf("StatusCode() = %d, want 503", got)
 	}
 }
 
