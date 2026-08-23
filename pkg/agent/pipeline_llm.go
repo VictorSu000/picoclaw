@@ -271,6 +271,7 @@ func (p *Pipeline) CallLLM(
 		backoffSecs = 2
 	}
 	for retry := 0; retry <= maxRetries; retry++ {
+		exec.emptyAfterRetries = false
 		exec.response, err = callLLM(exec.callMessages, exec.providerToolDefs)
 		if err == nil {
 			// Check for empty response (no content, no reasoning, no tool calls).
@@ -278,6 +279,7 @@ func (p *Pipeline) CallLLM(
 			// published to the user — an empty response never publishes output.
 			if exec.response != nil && isLLMResponseEmpty(exec.response) && !streamingPublisherVisible(exec.streamingPublisher) {
 				if retry < maxRetries {
+					cancelConfiguredStreamingLLM(turnCtx, exec)
 					cancelConfiguredStreamingLLM(turnCtx, exec)
 					backoff := time.Duration(retry+1) * time.Duration(backoffSecs) * time.Second
 					al.emitEvent(
@@ -311,6 +313,7 @@ func (p *Pipeline) CallLLM(
 					"retries": retry,
 					"model":   exec.llmModel,
 				})
+				exec.emptyAfterRetries = true
 			}
 			break
 		}

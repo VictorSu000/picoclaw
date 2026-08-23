@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -507,8 +508,16 @@ func spawnSubTurn(
 			ForLLM: fmt.Sprintf("SubTurn failed: %v", turnErr),
 		}
 	} else {
+		forLLM := turnRes.finalContent
+		if strings.TrimSpace(forLLM) == "" && turnRes.emptyResponse {
+			// The subagent's model kept returning empty responses even after
+			// retries. Tell the parent explicitly instead of handing it a
+			// silent empty result it cannot interpret.
+			forLLM = "SubTurn produced no output: the model returned an empty response even after automatic retries. " +
+				"This usually indicates a temporary provider error; consider re-dispatching this task or continuing without its result."
+		}
 		result = &tools.ToolResult{
-			ForLLM:  turnRes.finalContent,
+			ForLLM:  forLLM,
 			ForUser: turnRes.finalContent,
 		}
 	}

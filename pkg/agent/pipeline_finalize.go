@@ -32,10 +32,11 @@ func (p *Pipeline) Finalize(
 		}
 		ts.setPhase(TurnPhaseCompleted)
 		return turnResult{
-			finalContent: finalContent,
-			modelName:    exec.llmModelName,
-			status:       turnStatus,
-			followUps:    append([]bus.InboundMessage(nil), ts.followUps...),
+			finalContent:  finalContent,
+			modelName:     exec.llmModelName,
+			status:        turnStatus,
+			followUps:     append([]bus.InboundMessage(nil), ts.followUps...),
+			emptyResponse: exec.emptyAfterRetries && finalContent == "",
 		}, nil
 	}
 
@@ -99,9 +100,10 @@ func (p *Pipeline) Finalize(
 	}
 	ts.setPhase(TurnPhaseCompleted)
 	return turnResult{
-		finalContent: finalContent,
-		modelName:    exec.llmModelName,
-		status:       turnStatus,
-		followUps:    append([]bus.InboundMessage(nil), ts.followUps...),
+		finalContent:  finalContent,
+		modelName:     exec.llmModelName,
+		status:        turnStatus,
+		followUps:     append([]bus.InboundMessage(nil), ts.followUps...),
+		emptyResponse: exec.emptyAfterRetries && finalContent == "",
 	}, nil
 }

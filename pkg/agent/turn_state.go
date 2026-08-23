@@ -87,6 +87,11 @@ type turnResult struct {
 	modelName    string
 	status       TurnEndStatus
 	followUps    []bus.InboundMessage
+	// emptyResponse reports whether the last LLM response was still empty
+	// (no content, no reasoning, no tool calls) even after retries. Used by
+	// SubTurns to give the parent agent an explicit failure instead of a
+	// silent empty result.
+	emptyResponse bool
 }
 
 // =============================================================================
@@ -151,6 +156,10 @@ type turnExecution struct {
 
 	// Phase tracking
 	phase LLMPhase
+
+	// emptyAfterRetries is set when the final LLM attempt of the current
+	// CallLLM still returned an empty response after exhausting retries.
+	emptyAfterRetries bool
 
 	// Abort signaling for coordinator (set by Pipeline methods)
 	abortedByHardAbort bool // true when hard abort triggered during LLM/tools
