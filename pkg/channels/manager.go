@@ -1112,11 +1112,15 @@ func (m *Manager) SetupHTTPServerListeners(listeners []net.Listener, addr string
 	// Discover and register webhook handlers and health checkers
 	m.registerHTTPHandlersLocked()
 
+	// ReadTimeout/WriteTimeout intentionally left unset (0): request bodies and
+	// streamed responses (uploads, SSE, hijacked WebSocket flows) may legitimately
+	// take minutes over slow remote links such as Cloudflare tunnels. Only the
+	// header phase is bounded, plus an idle keep-alive deadline.
 	m.httpServer = &http.Server{
-		Addr:         addr,
-		Handler:      m.mux,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		Addr:              addr,
+		Handler:           m.mux,
+		ReadHeaderTimeout: 30 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 	m.httpListeners = append([]net.Listener(nil), listeners...)
 }

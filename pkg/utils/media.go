@@ -76,7 +76,9 @@ type DownloadOptions struct {
 func DownloadFile(urlStr, filename string, opts DownloadOptions) string {
 	// Set defaults
 	if opts.Timeout == 0 {
-		opts.Timeout = 60 * time.Second
+		// Generous cap for large attachments over slow platform CDNs; covers the
+		// whole request including reading the body.
+		opts.Timeout = 300 * time.Second
 	}
 	if opts.LoggerPrefix == "" {
 		opts.LoggerPrefix = "utils"
