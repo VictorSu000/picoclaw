@@ -31,9 +31,9 @@ const (
 	userAgentHonest = "picoclaw/%s (+https://github.com/sipeed/picoclaw; AI assistant bot)"
 
 	// HTTP client timeouts for web tool providers.
-	searchTimeout     = 10 * time.Second // Brave, Tavily, DuckDuckGo
-	perplexityTimeout = 30 * time.Second // Perplexity (LLM-based, slower)
-	fetchTimeout      = 60 * time.Second // WebFetchTool
+	searchTimeout     = 180 * time.Second // Brave, Tavily, DuckDuckGo
+	perplexityTimeout = 180 * time.Second // Perplexity (LLM-based, slower)
+	fetchTimeout      = 180 * time.Second // WebFetchTool
 
 	defaultMaxChars = 50000
 	maxRedirects    = 5
