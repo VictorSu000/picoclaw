@@ -117,6 +117,7 @@ func (p *Pipeline) tryConfiguredStreamingLLM(
 			}
 			if publisher.Published() {
 				logger.WarnCF("agent", "ChatStream update failed after visible output", logFields)
+				exec.streamingPublisher = publisher
 				return nil, true, configuredStreamingVisibleError{err: updateErr}
 			}
 			logger.WarnCF("agent", "ChatStream update failed before visible output; retrying with Chat", logFields)
@@ -161,10 +162,11 @@ func (p *Pipeline) tryConfiguredStreamingLLM(
 			}
 			return fallbackResponse, true, err
 		}
+		exec.streamingPublisher = publisher
 		return nil, true, configuredStreamingVisibleError{err: streamErr}
 	}
 
-	if response != nil {
+	if response != nil || publisher.Published() {
 		exec.streamingPublisher = publisher
 	}
 
@@ -382,6 +384,7 @@ type streamingChunkPublisher struct {
 	published          bool
 	reasoningPublished bool
 	err                error
+	lastContent        string
 }
 
 func (p *streamingChunkPublisher) Update(ctx context.Context, accumulated string) {
@@ -401,6 +404,7 @@ func (p *streamingChunkPublisher) Update(ctx context.Context, accumulated string
 		return
 	}
 	p.published = true
+	p.lastContent = accumulated
 }
 
 func (p *streamingChunkPublisher) UpdateReasoning(ctx context.Context, accumulated string) {
@@ -439,6 +443,13 @@ func (p *streamingChunkPublisher) Err() error {
 		return nil
 	}
 	return p.err
+}
+
+func (p *streamingChunkPublisher) LastContent() string {
+	if p == nil {
+		return ""
+	}
+	return p.lastContent
 }
 
 func (p *streamingChunkPublisher) Finalize(ctx context.Context, content string, contextUsage *bus.ContextUsage) error {

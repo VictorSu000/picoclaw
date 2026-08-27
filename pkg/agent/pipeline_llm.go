@@ -323,7 +323,13 @@ func (p *Pipeline) CallLLM(
 			return ControlBreak, nil
 		}
 		if isConfiguredStreamingVisibleError(err) {
-			break
+			if exec.streamingPublisher != nil {
+				exec.finalContent = exec.streamingPublisher.LastContent()
+			}
+			if exec.finalContent == "" && exec.response != nil {
+				exec.finalContent = exec.response.Content
+			}
+			return ControlBreak, nil
 		}
 
 		if hasMediaRefs(exec.callMessages) && isVisionUnsupportedError(err) {

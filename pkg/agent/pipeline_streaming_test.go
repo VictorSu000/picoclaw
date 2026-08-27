@@ -770,13 +770,13 @@ func TestConfiguredStreamingLaterUpdateFailureThenStreamSuccessReturnsVisibleErr
 	}
 	al := NewAgentLoop(cfg, msgBus, provider)
 
-	_, err := al.runAgentLoop(
+	resp, err := al.runAgentLoop(
 		context.Background(),
 		al.GetRegistry().GetDefaultAgent(),
 		configuredStreamingProcessOptions("pico"),
 	)
-	if err == nil {
-		t.Fatal("expected post-visible update failure to return an error")
+	if err != nil {
+		t.Fatalf("unexpected error for later update failure: %v", err)
 	}
 	if provider.streamCalls != 1 || provider.chatCalls != 0 {
 		t.Fatalf("calls = stream:%d chat:%d, want stream:1 chat:0", provider.streamCalls, provider.chatCalls)
@@ -784,13 +784,18 @@ func TestConfiguredStreamingLaterUpdateFailureThenStreamSuccessReturnsVisibleErr
 	if streamer.canceled != 0 {
 		t.Fatalf("streamer canceled = %d, want 0", streamer.canceled)
 	}
-	if len(streamer.finalized) != 0 {
-		t.Fatalf("stream finalized = %v, want none", streamer.finalized)
+	// The visible content should be finalized despite the later update failure
+	if len(streamer.finalized) != 1 || streamer.finalized[0] != "visible chunk" {
+		t.Fatalf("stream finalized = %v, want [visible chunk]", streamer.finalized)
 	}
 	select {
 	case outbound := <-msgBus.OutboundChan():
 		t.Fatalf("unexpected fallback outbound after post-visible update failure: %#v", outbound)
 	default:
+	}
+	// The visible content should be persisted despite the later update failure
+	if resp != "visible chunk" {
+		t.Fatalf("response = %q, want visible chunk persisted", resp)
 	}
 }
 
@@ -888,13 +893,13 @@ func TestConfiguredStreamingPostChunkFailureDoesNotFallBackToChat(t *testing.T) 
 	}
 	al := NewAgentLoop(cfg, msgBus, provider)
 
-	_, err := al.runAgentLoop(
+	resp, err := al.runAgentLoop(
 		context.Background(),
 		al.GetRegistry().GetDefaultAgent(),
 		configuredStreamingProcessOptions("pico"),
 	)
-	if err == nil {
-		t.Fatal("expected post-chunk stream failure to return an error")
+	if err != nil {
+		t.Fatalf("unexpected error for visible stream failure: %v", err)
 	}
 	if provider.streamCalls != 1 || provider.chatCalls != 0 {
 		t.Fatalf("calls = stream:%d chat:%d, want stream:1 chat:0", provider.streamCalls, provider.chatCalls)
@@ -904,6 +909,9 @@ func TestConfiguredStreamingPostChunkFailureDoesNotFallBackToChat(t *testing.T) 
 	}
 	if streamer.canceled != 0 {
 		t.Fatalf("streamer canceled = %d, want 0 for already-visible stream failure", streamer.canceled)
+	}
+	if resp != "partial" {
+		t.Fatalf("response = %q, want partial content persisted", resp)
 	}
 }
 
@@ -921,13 +929,13 @@ func TestConfiguredStreamingPostChunkEOFDoesNotRetryOrCancelVisibleOutput(t *tes
 	}
 	al := NewAgentLoop(cfg, msgBus, provider)
 
-	_, err := al.runAgentLoop(
+	resp, err := al.runAgentLoop(
 		context.Background(),
 		al.GetRegistry().GetDefaultAgent(),
 		configuredStreamingProcessOptions("pico"),
 	)
-	if err == nil {
-		t.Fatal("expected post-chunk EOF to return an error")
+	if err != nil {
+		t.Fatalf("unexpected error for visible stream EOF: %v", err)
 	}
 	if provider.streamCalls != 1 || provider.chatCalls != 0 {
 		t.Fatalf("calls = stream:%d chat:%d, want stream:1 chat:0", provider.streamCalls, provider.chatCalls)
@@ -937,6 +945,9 @@ func TestConfiguredStreamingPostChunkEOFDoesNotRetryOrCancelVisibleOutput(t *tes
 	}
 	if streamer.canceled != 0 {
 		t.Fatalf("streamer canceled = %d, want 0 for already-visible stream EOF", streamer.canceled)
+	}
+	if resp != "partial" {
+		t.Fatalf("response = %q, want partial content persisted", resp)
 	}
 }
 
