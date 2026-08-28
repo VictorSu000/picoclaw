@@ -82,9 +82,7 @@ func VisibleToolCallNameAndArguments(tc providers.ToolCall) (string, string) {
 		argsJSON = strings.TrimSpace(tc.Function.Arguments)
 	}
 	if argsJSON == "" && len(tc.Arguments) > 0 {
-		if encodedArgs, err := json.Marshal(tc.Arguments); err == nil {
-			argsJSON = string(encodedArgs)
-		}
+		argsJSON = FormatArgsJSON(tc.Arguments, false, true)
 	}
 	return name, strings.TrimSpace(argsJSON)
 }
