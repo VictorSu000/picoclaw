@@ -29,6 +29,10 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState, pipeline *Pipel
 	if al.takePendingStop(ts.sessionKey) {
 		_ = ts.requestHardAbort()
 	}
+	if al.takePendingPause(ts.sessionKey) {
+		_ = ts.requestGracefulInterrupt("")
+		al.markPauseMarker(ts.sessionKey)
+	}
 
 	turnStatus := TurnEndStatusCompleted
 	defer func() {

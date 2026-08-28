@@ -64,6 +64,33 @@ func (p *Pipeline) Finalize(
 			cancelConfiguredStreamingLLM(turnCtx, exec)
 			return turnResult{status: TurnEndStatusError}, err
 		}
+
+		// If the user paused this turn, inject a persistent note into the
+		// session history after the agent's summary so subsequent turns can
+		// tell where work was interrupted. A "user" role is used (not "system")
+		// because sanitizeHistoryForProvider drops system messages before they
+		// reach the provider; a user-role note survives sanitization and is
+		// visible to the model on the next turn.
+		if al.takePauseMarker(ts.sessionKey) {
+			marker := providers.Message{
+				Role:    "user",
+				Content: "[The user paused this task. The above summary marks where work stopped. Await the user's next instruction.]",
+			}
+			ts.agent.Sessions.AddFullMessage(ts.sessionKey, marker)
+			ts.recordPersistedMessage(marker)
+			if err := ts.agent.Sessions.Save(ts.sessionKey); err != nil {
+				al.emitEvent(
+					runtimeevents.KindAgentError,
+					ts.eventMeta("runTurn", "turn.error"),
+					ErrorPayload{
+						Stage:   "session_save",
+						Message: err.Error(),
+					},
+				)
+				cancelConfiguredStreamingLLM(turnCtx, exec)
+				return turnResult{status: TurnEndStatusError}, err
+			}
+		}
 	}
 
 	if !ts.opts.NoHistory && ts.opts.EnableSummary {

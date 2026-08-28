@@ -9,6 +9,7 @@ func BuiltinDefinitions() []Definition {
 		startCommand(),
 		helpCommand(),
 		stopCommand(),
+		pauseCommand(),
 		showCommand(),
 		listCommand(),
 		useCommand(),

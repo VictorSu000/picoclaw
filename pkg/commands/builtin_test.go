@@ -45,6 +45,9 @@ func TestBuiltinHelpHandler_ReturnsFormattedMessage(t *testing.T) {
 	if !strings.Contains(reply, "/stop") {
 		t.Fatalf("/help reply missing /stop usage, got %q", reply)
 	}
+	if !strings.Contains(reply, "/pause") {
+		t.Fatalf("/help reply missing /pause usage, got %q", reply)
+	}
 	if !strings.Contains(reply, "/use <skill> <message>") {
 		if !strings.Contains(reply, "/use <skill> [message]") {
 			t.Fatalf("/help reply missing /use usage, got %q", reply)
@@ -102,6 +105,79 @@ func TestBuiltinStop_NoActiveTask(t *testing.T) {
 	}
 	if reply != "No active task to stop." {
 		t.Fatalf("/stop reply=%q, want no-active message", reply)
+	}
+}
+
+func TestBuiltinPause_UsesRuntimePauser(t *testing.T) {
+	rt := &Runtime{
+		PauseActiveTurn: func() (PauseResult, error) {
+			return PauseResult{
+				Paused:   true,
+				TaskName: "sync the long running job",
+			}, nil
+		},
+	}
+	defs := BuiltinDefinitions()
+	ex := NewExecutor(NewRegistry(defs), rt)
+
+	var reply string
+	res := ex.Execute(context.Background(), Request{
+		Text: "/pause",
+		Reply: func(text string) error {
+			reply = text
+			return nil
+		},
+	})
+	if res.Outcome != OutcomeHandled {
+		t.Fatalf("/pause: outcome=%v, want=%v", res.Outcome, OutcomeHandled)
+	}
+	if reply != "Task paused. \"sync the long running job\" was paused, context kept." {
+		t.Fatalf("/pause reply=%q", reply)
+	}
+}
+
+func TestBuiltinPause_NoActiveTask(t *testing.T) {
+	rt := &Runtime{
+		PauseActiveTurn: func() (PauseResult, error) {
+			return PauseResult{}, nil
+		},
+	}
+	defs := BuiltinDefinitions()
+	ex := NewExecutor(NewRegistry(defs), rt)
+
+	var reply string
+	res := ex.Execute(context.Background(), Request{
+		Text: "/pause",
+		Reply: func(text string) error {
+			reply = text
+			return nil
+		},
+	})
+	if res.Outcome != OutcomeHandled {
+		t.Fatalf("/pause: outcome=%v, want=%v", res.Outcome, OutcomeHandled)
+	}
+	if reply != "No active task to pause." {
+		t.Fatalf("/pause reply=%q, want no-active message", reply)
+	}
+}
+
+func TestBuiltinPause_UnavailableWithoutRuntimePauser(t *testing.T) {
+	defs := BuiltinDefinitions()
+	ex := NewExecutor(NewRegistry(defs), &Runtime{})
+
+	var reply string
+	res := ex.Execute(context.Background(), Request{
+		Text: "/pause",
+		Reply: func(text string) error {
+			reply = text
+			return nil
+		},
+	})
+	if res.Outcome != OutcomeHandled {
+		t.Fatalf("/pause: outcome=%v, want=%v", res.Outcome, OutcomeHandled)
+	}
+	if reply != unavailableMsg {
+		t.Fatalf("/pause reply=%q, want %q", reply, unavailableMsg)
 	}
 }
 

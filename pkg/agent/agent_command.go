@@ -447,6 +447,12 @@ func (al *AgentLoop) buildCommandsRuntime(
 		}
 		return al.stopActiveTurnForSession(opts.Dispatch.SessionKey)
 	}
+	rt.PauseActiveTurn = func() (commands.PauseResult, error) {
+		if opts == nil {
+			return commands.PauseResult{}, fmt.Errorf("process options not available")
+		}
+		return al.pauseActiveTurnForSession(opts.Dispatch.SessionKey)
+	}
 	if agent != nil && agent.ContextBuilder != nil {
 		rt.ListSkillNames = agent.ContextBuilder.ListSkillNames
 	}

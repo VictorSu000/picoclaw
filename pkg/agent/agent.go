@@ -60,6 +60,8 @@ type AgentLoop struct {
 	steering         *steeringQueue
 	pendingSkills    sync.Map
 	pendingStops     sync.Map
+	pendingPauses    sync.Map
+	pauseMarkers     sync.Map
 	sessionTitleJobs sync.Map
 	mu               sync.RWMutex
 
@@ -193,6 +195,9 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 			}
 			if _, loaded := al.activeTurnStates.LoadOrStore(sessionKey, placeholder); loaded {
 				if al.tryHandleStopCommand(ctx, msg, sessionKey) {
+					continue
+				}
+				if al.tryHandlePauseCommand(ctx, msg, sessionKey) {
 					continue
 				}
 
