@@ -89,13 +89,25 @@ func outboundMessageFinalizesTrackedToolFeedback(msg bus.OutboundMessage) bool {
 }
 
 // writeJSON sends a JSON message to the connection with write locking.
+// It uses json.NewEncoder with SetEscapeHTML(false) to prevent characters
+// like '>' from being escaped to "\u003e" in tool call arguments.
 func (pc *picoConn) writeJSON(v any) error {
 	if pc.closed.Load() {
 		return fmt.Errorf("connection closed")
 	}
 	pc.writeMu.Lock()
 	defer pc.writeMu.Unlock()
-	return pc.conn.WriteJSON(v)
+	w, err := pc.conn.NextWriter(websocket.TextMessage)
+	if err != nil {
+		return err
+	}
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		w.Close()
+		return err
+	}
+	return w.Close()
 }
 
 // close closes the connection.
