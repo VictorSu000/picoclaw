@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"sync"
@@ -21,6 +22,7 @@ import (
 	"github.com/tencent-connect/botgo/constant"
 	"github.com/tencent-connect/botgo/dto"
 	"github.com/tencent-connect/botgo/event"
+	"github.com/tencent-connect/botgo/openapi"
 	"github.com/tencent-connect/botgo/openapi/options"
 	"github.com/tencent-connect/botgo/token"
 	"golang.org/x/oauth2"
@@ -58,8 +60,8 @@ type QQChannel struct {
 	*channels.BaseChannel
 	bc             *config.Channel
 	config         *config.QQSettings
-	api            qqAPI
-	tokenSource    oauth2.TokenSource
+	api         qqAPI
+	tokenSource oauth2.TokenSource
 	ctx            context.Context
 	cancel         context.CancelFunc
 	sessionManager botgo.SessionManager
@@ -127,7 +129,17 @@ func (c *QQChannel) Start(ctx context.Context) error {
 	}
 
 	// initialize OpenAPI client
-	c.api = botgo.NewOpenAPI(c.config.AppID, c.tokenSource).WithTimeout(5 * time.Second)
+	openAPI := botgo.NewOpenAPI(c.config.AppID, c.tokenSource).WithTimeout(5 * time.Second)
+	c.api = openAPI
+
+	// fix botgo/resty auth scheme bug: botgo sets c.SetAuthScheme("QQBot") on
+	// the resty Client, but resty's addCredentials reads r.AuthScheme which was
+	// copied from the Client's DEFAULT "Bearer" at request creation time.
+	// This wrapper rewrites "Authorization: Bearer xxx" → "Authorization: QQBot xxx".
+	wrapErr := c.WrapAPITransport(openAPI, FixBotgoAuthScheme)
+	if wrapErr != nil {
+		logger.WarnC("qq", "Failed to wrap API transport for auth fix")
+	}
 
 	// register event handlers
 	intent := event.RegisterHandlers(
@@ -185,6 +197,77 @@ func (c *QQChannel) Stop(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// WrapAPITransport replaces the HTTP transport used by the botgo OpenAPI client.
+// This allows intercepting all HTTP requests made by the SDK (e.g. for debug logging).
+// Must be called after Start() (which initializes the OpenAPI client).
+func (c *QQChannel) WrapAPITransport(api openapi.OpenAPI, wrapper func(inner http.RoundTripper) http.RoundTripper) error {
+	if api == nil {
+		return fmt.Errorf("openAPI is nil")
+	}
+
+	// Access the concrete openAPI struct via reflection.
+	// The struct has an unexported "restyClient" field of type *resty.Client.
+	apiVal := reflect.ValueOf(api)
+	if apiVal.Kind() == reflect.Ptr {
+		apiVal = apiVal.Elem()
+	}
+	if apiVal.Kind() != reflect.Struct {
+		return fmt.Errorf("openAPI is %s, not struct", apiVal.Kind())
+	}
+
+	restyField := apiVal.FieldByName("restyClient")
+	if !restyField.IsValid() {
+		return fmt.Errorf("restyClient field not found")
+	}
+
+	// Use reflect.NewAt to create a pointer to the resty client value.
+	restyPtr := reflect.NewAt(restyField.Type(), restyField.Addr().UnsafePointer()).Elem()
+
+	// Call GetClient() method on the resty client to get *http.Client.
+	getClientMethod := restyPtr.MethodByName("GetClient")
+	if !getClientMethod.IsValid() {
+		return fmt.Errorf("GetClient method not found")
+	}
+
+	results := getClientMethod.Call(nil)
+	if len(results) == 0 {
+		return fmt.Errorf("GetClient returned nothing")
+	}
+
+	httpClient, ok := results[0].Interface().(*http.Client)
+	if !ok {
+		return fmt.Errorf("GetClient returned %T, not *http.Client", results[0].Interface())
+	}
+
+	origTransport := httpClient.Transport
+	if origTransport == nil {
+		origTransport = http.DefaultTransport
+	}
+
+	httpClient.Transport = wrapper(origTransport)
+	return nil
+}
+
+// FixBotgoAuthScheme wraps a RoundTripper to fix a botgo/resty compatibility bug.
+// botgo's OnBeforeRequest hook calls c.SetAuthScheme("QQBot") on the resty Client,
+// but resty's addCredentials middleware reads r.AuthScheme which was copied from
+// the Client's DEFAULT value ("Bearer") at request creation time (c.R()).
+// This wrapper rewrites "Authorization: Bearer xxx" → "Authorization: QQBot xxx".
+func FixBotgoAuthScheme(inner http.RoundTripper) http.RoundTripper {
+	return &fixAuthTransport{inner: inner}
+}
+
+type fixAuthTransport struct {
+	inner http.RoundTripper
+}
+
+func (t *fixAuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if auth := req.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+		req.Header.Set("Authorization", "QQBot "+auth[len("Bearer "):])
+	}
+	return t.inner.RoundTrip(req)
 }
 
 // getChatKind returns the chat type for a given chatID ("group" or "direct").
