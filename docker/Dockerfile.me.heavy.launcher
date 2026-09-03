@@ -76,7 +76,7 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
   uv --version
 
 # install npm packages
-RUN npm config set registry https://mirrors.tencent.com/npm/ && npm install -g cloudcmd gritty opencode-ai mineru-open-api
+RUN npm config set registry https://mirrors.tencent.com/npm/ && npm install -g yarn cloudcmd gritty opencode-ai mineru-open-api
 
 # install python packges
 RUN pip config set global.index-url https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple && pip install --break-system-packages openpyxl pandas xlrd xlwt python-docx requests boto3 akshare akquant matplotlib
