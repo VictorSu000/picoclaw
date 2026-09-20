@@ -61,6 +61,7 @@ RUN sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list.d/debi
   python3-pip \
   python3.11-venv \
   chromium \
+  vim \
   jq
 
 # Install Playwright browsers for agent-browser
