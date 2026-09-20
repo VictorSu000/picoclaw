@@ -61,7 +61,7 @@ const baseNavGroups: Omit<NavGroup, "items">[] = [
   },
   {
     label: "navigation.agent_group",
-    defaultOpen: true,
+    defaultOpen: false,
   },
   {
     label: "navigation.services",
@@ -136,7 +136,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       },
       {
         label: "navigation.channels_group",
-        defaultOpen: true,
+        defaultOpen: false,
         items: channelItems.map((item) => ({
           title: item.title,
           url: item.url,
