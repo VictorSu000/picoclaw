@@ -135,11 +135,7 @@ func RunToolLoop(
 			Content: response.Content,
 		}
 		for _, tc := range normalizedToolCalls {
-			argumentsJSON, err := json.Marshal(tc.Arguments)
-			if err != nil {
-				logger.Warnf("toolloop: failed to marshal tool call arguments for %s: %v", tc.Name, err)
-				argumentsJSON = []byte("{}")
-			}
+			argumentsJSON := utils.FormatArgsJSON(tc.Arguments, false, true)
 			assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, providers.ToolCall{
 				ID:        tc.ID,
 				Type:      "function",

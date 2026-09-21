@@ -4,7 +4,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	runtimeevents "github.com/sipeed/picoclaw/pkg/events"
 	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/providers"
+	"github.com/sipeed/picoclaw/pkg/utils"
 )
 
 // CallLLM performs an LLM call with fallback support, hook invocation, and retry logic.
@@ -670,7 +670,7 @@ func (p *Pipeline) CallLLM(
 		ReasoningContent: reasoningContent,
 	}
 	for _, tc := range exec.normalizedToolCalls {
-		argumentsJSON, _ := json.Marshal(tc.Arguments)
+		argumentsJSON := utils.FormatArgsJSON(tc.Arguments, false, true)
 		toolFeedbackExplanation := toolFeedbackExplanationForToolCall(
 			exec.response,
 			tc,
