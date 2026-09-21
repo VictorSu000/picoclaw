@@ -97,8 +97,5 @@ func VisibleToolCallArgumentsPreview(tc providers.ToolCall, maxLen int) string {
 	if err := json.Indent(&pretty, []byte(argsJSON), "", "  "); err == nil {
 		argsJSON = pretty.String()
 	}
-	if maxLen > 0 {
-		return Truncate(argsJSON, maxLen)
-	}
 	return argsJSON
 }
