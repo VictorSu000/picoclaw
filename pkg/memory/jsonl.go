@@ -22,6 +22,23 @@ import (
 	"github.com/sipeed/picoclaw/pkg/providers/messageutil"
 )
 
+// marshalJSONNoEscape serializes v to JSON without escaping HTML characters
+// like '<', '>', and '&'. This preserves the original characters in tool
+// output (e.g. HTML/XML from read_file, web search results) instead of
+// writing them as \u003c, \u003e, \u0026.
+func marshalJSONNoEscape(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	// json.Encoder appends a trailing newline; strip it so callers that
+	// manually append '\n' don't produce double newlines.
+	b := buf.Bytes()
+	return bytes.TrimRight(b, "\n"), nil
+}
+
 const (
 	// numLockShards is the fixed number of mutexes used to serialize
 	// per-session access. Using a sharded array instead of a map keeps
@@ -714,7 +731,7 @@ func (s *JSONLStore) addMsg(sessionKey string, msg providers.Message) error {
 	}
 
 	// Append the message as a single JSON line.
-	line, err := json.Marshal(msg)
+	line, err := marshalJSONNoEscape(msg)
 	if err != nil {
 		return fmt.Errorf("memory: marshal message: %w", err)
 	}
@@ -803,7 +820,7 @@ func (s *JSONLStore) ArchiveMessages(
 		if messageutil.IsTransientAssistantThoughtMessage(msg) {
 			continue
 		}
-		line, err := json.Marshal(msg)
+		line, err := marshalJSONNoEscape(msg)
 		if err != nil {
 			return fmt.Errorf("memory: marshal archived message: %w", err)
 		}
@@ -876,7 +893,7 @@ func (s *JSONLStore) ReplaceArchivedMessages(
 
 	var buf bytes.Buffer
 	for i, msg := range history {
-		line, err := json.Marshal(msg)
+		line, err := marshalJSONNoEscape(msg)
 		if err != nil {
 			return fmt.Errorf("memory: marshal archived message %d: %w", i, err)
 		}
@@ -1055,7 +1072,7 @@ func (s *JSONLStore) rewriteJSONL(
 
 	var buf bytes.Buffer
 	for i, msg := range msgs {
-		line, err := json.Marshal(msg)
+		line, err := marshalJSONNoEscape(msg)
 		if err != nil {
 			return fmt.Errorf("memory: marshal message %d: %w", i, err)
 		}

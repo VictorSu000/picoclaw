@@ -1025,7 +1025,9 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 
 	response := h.buildSessionDetailResponse(sessionID, sess, toolFeedbackMaxArgsLength)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(response)
 }
 
 func (h *Handler) buildSessionDetailResponse(
@@ -1701,7 +1703,9 @@ func (h *Handler) handleDeleteMessageSeries(w http.ResponseWriter, r *http.Reque
 		}
 		response := h.buildSessionDetailResponse(sessionID, updated, toolFeedbackMaxArgsLength)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		enc := json.NewEncoder(w)
+		enc.SetEscapeHTML(false)
+		_ = enc.Encode(response)
 		return
 	} else if !errors.Is(refErr, os.ErrNotExist) {
 		http.Error(w, "failed to find session", http.StatusInternalServerError)
@@ -1895,6 +1899,7 @@ func (h *Handler) handleForkSession(w http.ResponseWriter, r *http.Request) {
 	defer jsonlFile.Close()
 
 	encoder := json.NewEncoder(jsonlFile)
+	encoder.SetEscapeHTML(false)
 	for _, msg := range forkedMessages {
 		if err := encoder.Encode(msg); err != nil {
 			http.Error(w, "failed to write messages to new session", http.StatusInternalServerError)
