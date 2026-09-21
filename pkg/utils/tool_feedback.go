@@ -7,8 +7,6 @@ import (
 	"strings"
 )
 
-const ToolFeedbackContinuationHint = "Continuing the current task."
-
 func FormatArgsJSON(args map[string]any, prettyPrint, disableEscapeHTML bool) string {
 	// Normalize nil to empty map for consistent output
 	if args == nil {

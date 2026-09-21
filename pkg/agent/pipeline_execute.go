@@ -202,7 +202,6 @@ toolLoop:
 						toolFeedbackExplanation := toolFeedbackExplanationForToolCall(
 							exec.response,
 							tc,
-							messages,
 						)
 						feedbackMsg := utils.FormatToolFeedbackMessage(
 							toolName,
@@ -494,7 +493,6 @@ toolLoop:
 			toolFeedbackExplanation := toolFeedbackExplanationForToolCall(
 				exec.response,
 				tc,
-				messages,
 			)
 			feedbackMsg := utils.FormatToolFeedbackMessage(
 				toolName,

@@ -140,22 +140,8 @@ func outboundMessageForTurnWithOptions(
 	return msg
 }
 
-func latestUserContent(messages []providers.Message) string {
-	for i := len(messages) - 1; i >= 0; i-- {
-		msg := messages[i]
-		if msg.Role != "user" {
-			continue
-		}
-		if content := strings.TrimSpace(msg.Content); content != "" {
-			return content
-		}
-	}
-	return ""
-}
-
 func toolFeedbackExplanationFromResponse(
 	response *providers.LLMResponse,
-	messages []providers.Message,
 ) string {
 	if response == nil {
 		return ""
@@ -163,9 +149,6 @@ func toolFeedbackExplanationFromResponse(
 	explanation := strings.TrimSpace(response.Content)
 	if explanation == "" {
 		explanation = toolFeedbackExplanationFromToolCalls(response.ToolCalls)
-	}
-	if explanation == "" {
-		explanation = toolFeedbackExplanationFromMessages(messages)
 	}
 	return explanation
 }
@@ -185,7 +168,6 @@ func toolFeedbackExplanationFromToolCalls(toolCalls []providers.ToolCall) string
 func toolFeedbackExplanationForToolCall(
 	response *providers.LLMResponse,
 	toolCall providers.ToolCall,
-	messages []providers.Message,
 ) string {
 	if toolCall.ExtraContent != nil {
 		if explanation := strings.TrimSpace(toolCall.ExtraContent.ToolFeedbackExplanation); explanation != "" {
@@ -193,22 +175,9 @@ func toolFeedbackExplanationForToolCall(
 		}
 	}
 	if response == nil {
-		return toolFeedbackExplanationFromMessages(messages)
+		return ""
 	}
-
-	explanation := strings.TrimSpace(response.Content)
-	if explanation == "" {
-		explanation = toolFeedbackExplanationFromMessages(messages)
-	}
-	return explanation
-}
-
-func toolFeedbackExplanationFromMessages(messages []providers.Message) string {
-	explanation := latestUserContent(messages)
-	if explanation != "" {
-		return utils.ToolFeedbackContinuationHint + ": " + explanation
-	}
-	return ""
+	return strings.TrimSpace(response.Content)
 }
 
 func toolFeedbackArgsPreview(args map[string]any, maxLen int) string {

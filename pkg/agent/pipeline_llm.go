@@ -674,7 +674,6 @@ func (p *Pipeline) CallLLM(
 		toolFeedbackExplanation := toolFeedbackExplanationForToolCall(
 			exec.response,
 			tc,
-			exec.messages,
 		)
 		extraContent := tc.ExtraContent
 		if strings.TrimSpace(toolFeedbackExplanation) != "" {

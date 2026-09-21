@@ -27,7 +27,6 @@ import (
 	"github.com/sipeed/picoclaw/pkg/routing"
 	"github.com/sipeed/picoclaw/pkg/session"
 	"github.com/sipeed/picoclaw/pkg/tools"
-	"github.com/sipeed/picoclaw/pkg/utils"
 )
 
 type fakeChannel struct{ id string }
@@ -2679,13 +2678,8 @@ func TestToolFeedbackExplanationFromResponse_UsesCurrentContentFirst(t *testing.
 		Content:          "Read README.md first",
 		ReasoningContent: "current reasoning fallback",
 	}
-	messages := []providers.Message{
-		{Role: "user", Content: "check file"},
-		{Role: "assistant", Content: "Previous turn explanation"},
-		{Role: "tool", Content: "tool output", ToolCallID: "call_1"},
-	}
 
-	got := toolFeedbackExplanationFromResponse(response, messages)
+	got := toolFeedbackExplanationFromResponse(response)
 	if got != "Read README.md first" {
 		t.Fatalf("toolFeedbackExplanationFromResponse() = %q, want current content", got)
 	}
@@ -2723,13 +2717,8 @@ func TestToolFeedbackExplanationFromResponse_UsesExplicitToolCallExtraContent(t 
 			},
 		}},
 	}
-	messages := []providers.Message{
-		{Role: "user", Content: "check file"},
-		{Role: "assistant", Content: ""},
-		{Role: "tool", Content: "tool output", ToolCallID: "call_1"},
-	}
 
-	got := toolFeedbackExplanationFromResponse(response, messages)
+	got := toolFeedbackExplanationFromResponse(response)
 	if got != "Read README.md first to confirm the current project structure." {
 		t.Fatalf("toolFeedbackExplanationFromResponse() = %q, want explicit tool feedback explanation", got)
 	}
@@ -2756,8 +2745,8 @@ func TestToolFeedbackExplanationForToolCall_PrefersToolSpecificExtraContent(t *t
 		},
 	}
 
-	got1 := toolFeedbackExplanationForToolCall(response, response.ToolCalls[0], nil)
-	got2 := toolFeedbackExplanationForToolCall(response, response.ToolCalls[1], nil)
+	got1 := toolFeedbackExplanationForToolCall(response, response.ToolCalls[0])
+	got2 := toolFeedbackExplanationForToolCall(response, response.ToolCalls[1])
 	if got1 != "Read README.md first." {
 		t.Fatalf("toolFeedbackExplanationForToolCall() first = %q, want tool-specific explanation", got1)
 	}
@@ -2782,14 +2771,10 @@ func TestToolFeedbackExplanationForToolCall_DoesNotReuseAnotherToolCallExplanati
 			},
 		},
 	}
-	messages := []providers.Message{
-		{Role: "user", Content: "inspect the config and update the example"},
-	}
 
-	got := toolFeedbackExplanationForToolCall(response, response.ToolCalls[0], messages)
-	want := utils.ToolFeedbackContinuationHint + ": inspect the config and update the example"
-	if got != want {
-		t.Fatalf("toolFeedbackExplanationForToolCall() = %q, want %q", got, want)
+	got := toolFeedbackExplanationForToolCall(response, response.ToolCalls[0])
+	if got != "" {
+		t.Fatalf("toolFeedbackExplanationForToolCall() = %q, want empty string", got)
 	}
 }
 
@@ -2798,17 +2783,10 @@ func TestToolFeedbackExplanationFromResponse_DoesNotUseReasoningContent(t *testi
 		Content:          "",
 		ReasoningContent: "hidden reasoning should not be shown",
 	}
-	messages := []providers.Message{
-		{Role: "user", Content: "check file"},
-		{Role: "assistant", Content: "Previous turn explanation"},
-		{Role: "user", Content: "Inspect README.md and update the config example."},
-		{Role: "tool", Content: "tool output", ToolCallID: "call_1"},
-	}
 
-	got := toolFeedbackExplanationFromResponse(response, messages)
-	want := utils.ToolFeedbackContinuationHint + ": Inspect README.md and update the config example."
-	if got != want {
-		t.Fatalf("toolFeedbackExplanationFromResponse() = %q, want latest user content fallback", got)
+	got := toolFeedbackExplanationFromResponse(response)
+	if got != "" {
+		t.Fatalf("toolFeedbackExplanationFromResponse() = %q, want empty string", got)
 	}
 }
 
@@ -2824,7 +2802,7 @@ func TestToolFeedbackExplanationForToolCall_DoesNotTruncateLongExplanation(t *te
 		}},
 	}
 
-	got := toolFeedbackExplanationForToolCall(response, response.ToolCalls[0], nil)
+	got := toolFeedbackExplanationForToolCall(response, response.ToolCalls[0])
 	if got != explanation {
 		t.Fatalf("toolFeedbackExplanationForToolCall() = %q, want full explanation", got)
 	}
@@ -5866,11 +5844,8 @@ func TestProcessMessage_PublishesToolFeedbackWhenEnabled(t *testing.T) {
 		if !strings.Contains(outbound.Content, "`read_file`") {
 			t.Fatalf("tool feedback content = %q, want read_file summary", outbound.Content)
 		}
-		if !strings.Contains(outbound.Content, utils.ToolFeedbackContinuationHint) {
-			t.Fatalf("tool feedback content = %q, want continuation hint fallback", outbound.Content)
-		}
-		if !strings.Contains(outbound.Content, "check tool feedback") {
-			t.Fatalf("tool feedback content = %q, want current user intent fallback", outbound.Content)
+		if strings.Contains(outbound.Content, "Continuing the current task.") {
+			t.Fatalf("tool feedback content = %q, should not contain continuation hint fallback", outbound.Content)
 		}
 		if !strings.Contains(outbound.Content, "\"path\":") {
 			t.Fatalf("tool feedback content = %q, want serialized tool arguments", outbound.Content)
@@ -6121,11 +6096,8 @@ func TestProcessMessage_DoesNotLeakReasoningContentInToolFeedback(t *testing.T) 
 		if !strings.Contains(outbound.Content, "`read_file`") {
 			t.Fatalf("tool feedback content = %q, want read_file summary", outbound.Content)
 		}
-		if !strings.Contains(outbound.Content, utils.ToolFeedbackContinuationHint) {
-			t.Fatalf("tool feedback content = %q, want continuation hint fallback", outbound.Content)
-		}
-		if !strings.Contains(outbound.Content, "check reasoning fallback") {
-			t.Fatalf("tool feedback content = %q, want current user intent fallback", outbound.Content)
+		if strings.Contains(outbound.Content, "Continuing the current task.") {
+			t.Fatalf("tool feedback content = %q, should not contain continuation hint fallback", outbound.Content)
 		}
 		if !strings.Contains(outbound.Content, "\"path\":") {
 			t.Fatalf("tool feedback content = %q, want serialized tool arguments", outbound.Content)
