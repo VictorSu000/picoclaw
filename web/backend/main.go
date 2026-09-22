@@ -658,6 +658,7 @@ func main() {
 	)
 	apiHandler.SetServerBindHost(hostInput, hostOverrideActive)
 	apiHandler.RegisterRoutes(mux)
+	apiHandler.StartSessionGC()
 
 	// Frontend Embedded Assets
 	registerEmbedRoutes(mux)
@@ -732,15 +733,15 @@ func main() {
 	// Start the server(s) in goroutines.
 	servers = make([]*http.Server, 0, len(listeners))
 	for _, ln := range listeners {
-	// ReadTimeout/WriteTimeout intentionally unset: uploads and proxied
-	// streaming responses (SSE, WebSocket upgrades) may legitimately run for
-	// minutes over slow remote links such as Cloudflare tunnels. Only the
-	// header phase is bounded, plus an idle keep-alive deadline.
-	srv := &http.Server{
-		Handler:           handler,
-		ReadHeaderTimeout: 30 * time.Second,
-		IdleTimeout:       120 * time.Second,
-	}
+		// ReadTimeout/WriteTimeout intentionally unset: uploads and proxied
+		// streaming responses (SSE, WebSocket upgrades) may legitimately run for
+		// minutes over slow remote links such as Cloudflare tunnels. Only the
+		// header phase is bounded, plus an idle keep-alive deadline.
+		srv := &http.Server{
+			Handler:           handler,
+			ReadHeaderTimeout: 30 * time.Second,
+			IdleTimeout:       120 * time.Second,
+		}
 		servers = append(servers, srv)
 
 		go func(s *http.Server, l net.Listener) {

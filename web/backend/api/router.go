@@ -28,6 +28,8 @@ type Handler struct {
 	wecomMu                    sync.Mutex
 	wecomFlows                 map[string]*wecomFlow
 	contextSummaryProvider     contextSummaryProviderFactory
+	sessionGCMu                sync.Mutex
+	sessionGCStop              chan struct{}
 }
 
 // NewHandler creates an instance of the API handler.
@@ -125,5 +127,6 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 // Shutdown gracefully shuts down the handler, stopping the gateway if it was started by this handler.
 func (h *Handler) Shutdown() {
+	h.StopSessionGC()
 	h.StopGateway()
 }

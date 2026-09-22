@@ -68,6 +68,7 @@ export function usePicoChat() {
     agentPresetName,
     agentPresetOverride,
     effectiveModelName,
+    hasHydratedActiveSession,
   } = useAtomValue(chatAtom)
 
   return {
@@ -81,9 +82,10 @@ export function usePicoChat() {
     agentPresetName,
     agentPresetOverride,
     effectiveModelName,
+    hasHydratedActiveSession,
     sendMessage: sendChatMessage,
     switchSession: switchChatSession,
-    newChat: newChatSession,
+    newChat: (category?: string) => newChatSession(category),
     forkChat: forkChatSession,
     deleteMessageSeries: deleteChatMessageSeries,
   }

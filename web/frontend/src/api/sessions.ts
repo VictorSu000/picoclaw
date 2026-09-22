@@ -8,6 +8,8 @@ export interface SessionSummary {
   created: string
   updated: string
   is_favorited: boolean
+  /** Empty string means the default category. */
+  category?: string
 }
 
 export interface SessionDetailMessage {
@@ -51,11 +53,15 @@ export interface SessionDetail {
 export async function getSessions(
   offset: number = 0,
   limit: number = 20,
+  category?: string,
 ): Promise<SessionSummary[]> {
   const params = new URLSearchParams({
     offset: offset.toString(),
     limit: limit.toString(),
   })
+  if (category) {
+    params.set("category", category)
+  }
 
   const res = await launcherFetch(`/api/sessions?${params.toString()}`)
   if (!res.ok) {
@@ -172,8 +178,28 @@ export async function deleteMessageSeries(
   )
   if (!res.ok) {
     throw new Error(
-      `Failed to delete a message series from session ${id}: ${res.status}`,
+      `Failed to delete message series from session ${id}: ${res.status}`,
     )
+  }
+  return res.json()
+}
+
+export async function setSessionCategory(
+  id: string,
+  category: string,
+): Promise<{ id: string; category: string }> {
+  const res = await launcherFetch(
+    `/api/sessions/${encodeURIComponent(id)}/category`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ category }),
+    },
+  )
+  if (!res.ok) {
+    throw new Error(`Failed to set session category: ${res.status}`)
   }
   return res.json()
 }

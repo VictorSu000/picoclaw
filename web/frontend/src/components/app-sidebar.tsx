@@ -6,15 +6,17 @@ import {
   IconKey,
   IconListDetails,
   IconMessageCircle,
+  IconPlus,
   IconSearch,
   IconSettings,
   IconSparkles,
   IconTools,
   IconApps,
 } from "@tabler/icons-react"
-import { Link, useRouterState } from "@tanstack/react-router"
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
 import React from "react"
 import { useTranslation } from "react-i18next"
+import { toast } from "sonner"
 
 import {
   Collapsible,
@@ -33,14 +35,31 @@ import {
   SidebarRail,
   useSidebar,
 } from "@/components/ui/sidebar"
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { useSidebarChannels } from "@/hooks/use-sidebar-channels"
 import { getExternalApps, type ExternalApp } from "@/api/external-apps"
+import {
+  createCategory,
+  getCategories,
+  DEFAULT_CATEGORY_ID,
+  type Category,
+} from "@/api/categories"
 
 interface NavItem {
   title: string
   url: string
   icon: React.ComponentType<{ className?: string }>
   translateTitle?: boolean
+  /** When set, this item navigates to / with ?category= (chat category tab). */
+  categoryId?: string
 }
 
 interface NavGroup {
@@ -71,10 +90,20 @@ const baseNavGroups: Omit<NavGroup, "items">[] = [
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const routerState = useRouterState()
+  const navigate = useNavigate()
   const { i18n, t } = useTranslation()
   const { isMobile, setOpenMobile } = useSidebar()
   const currentPath = routerState.location.pathname
+  const currentSearch = routerState.location.search as Record<string, unknown>
+  const activeCategory =
+    typeof currentSearch?.category === "string" && currentSearch.category
+      ? currentSearch.category
+      : DEFAULT_CATEGORY_ID
   const [externalApps, setExternalApps] = React.useState<ExternalApp[]>([])
+  const [categories, setCategories] = React.useState<Category[]>([])
+  const [createOpen, setCreateOpen] = React.useState(false)
+  const [newCategoryName, setNewCategoryName] = React.useState("")
+  const [creating, setCreating] = React.useState(false)
   const {
     channelItems,
     hasMoreChannels,
@@ -98,24 +127,90 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     loadExternalApps()
   }, [])
 
+  // Load conversation categories
+  React.useEffect(() => {
+    let cancelled = false
+    const loadCategories = async () => {
+      try {
+        const data = await getCategories()
+        if (!cancelled) setCategories(data)
+      } catch (err) {
+        console.error("Failed to load categories:", err)
+      }
+    }
+    void loadCategories()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const handleNavItemClick = React.useCallback(() => {
     if (isMobile) {
       setOpenMobile(false)
     }
   }, [isMobile, setOpenMobile])
 
+  const handleCreateCategory = async () => {
+    const name = newCategoryName.trim()
+    if (!name || creating) return
+    setCreating(true)
+    try {
+      const created = await createCategory(name)
+      setCategories((prev) => {
+        const defaultCat: Category = {
+          id: DEFAULT_CATEGORY_ID,
+          name: "",
+          created: new Date(0).toISOString(),
+        }
+        const existingDefault =
+          prev.find((c) => c.id === DEFAULT_CATEGORY_ID) ?? defaultCat
+        const others = prev.filter(
+          (c) => c.id !== DEFAULT_CATEGORY_ID && c.id !== created.id,
+        )
+        return [existingDefault, ...others, created]
+      })
+      setCreateOpen(false)
+      setNewCategoryName("")
+      handleNavItemClick()
+      await navigate({
+        to: "/",
+        search: { category: created.id },
+      })
+    } catch (err) {
+      console.error("Failed to create category:", err)
+      toast.error(
+        err instanceof Error && err.message === "duplicate"
+          ? t("categories.duplicateName")
+          : t("categories.createFailed"),
+      )
+    } finally {
+      setCreating(false)
+    }
+  }
+
   const navGroups: NavGroup[] = React.useMemo(() => {
+    const categoryItems: NavItem[] = categories.map((cat) => ({
+      title: cat.id === DEFAULT_CATEGORY_ID ? "categories.default" : cat.name,
+      url: cat.id === DEFAULT_CATEGORY_ID ? "/" : `/?category=${cat.id}`,
+      icon: IconMessageCircle,
+      translateTitle: cat.id === DEFAULT_CATEGORY_ID,
+      categoryId: cat.id,
+    }))
+    // Ensure default tab exists even before categories load.
+    if (categories.length === 0) {
+      categoryItems.push({
+        title: "categories.default",
+        url: "/",
+        icon: IconMessageCircle,
+        translateTitle: true,
+        categoryId: DEFAULT_CATEGORY_ID,
+      })
+    }
+
     const groups: NavGroup[] = [
       {
         ...baseNavGroups[0],
-        items: [
-          {
-            title: "navigation.chat",
-            url: "/",
-            icon: IconMessageCircle,
-            translateTitle: true,
-          },
-        ],
+        items: categoryItems,
       },
       {
         ...baseNavGroups[1],
@@ -202,7 +297,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     }
 
     return groups
-  }, [channelItems, externalApps])
+  }, [channelItems, externalApps, categories])
 
   return (
     <Sidebar
@@ -210,7 +305,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       className="bg-background border-r-border/20 border-r pt-3"
     >
       <SidebarContent className="bg-background">
-        {navGroups.map((group) => (
+        {navGroups.map((group, groupIndex) => (
           <Collapsible
             key={group.label}
             defaultOpen={group.defaultOpen}
@@ -227,10 +322,13 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 <SidebarGroupContent className="pt-1">
                   <SidebarMenu>
                     {group.items.map((item) => {
-                      const isActive =
-                        currentPath === item.url ||
-                        (item.url !== "/" &&
-                          currentPath.startsWith(`${item.url}/`))
+                      const isCategoryTab = item.categoryId !== undefined
+                      const isActive = isCategoryTab
+                        ? currentPath === "/" &&
+                          activeCategory === item.categoryId
+                        : currentPath === item.url ||
+                          (item.url !== "/" &&
+                            currentPath.startsWith(`${item.url}/`))
                       return (
                         <SidebarMenuItem key={item.title}>
                           <SidebarMenuButton
@@ -242,24 +340,62 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                             }
                             className={`h-9 px-3 ${isActive ? "bg-accent/80 text-foreground font-medium" : "text-muted-foreground hover:bg-muted/60"}`}
                           >
-                            <Link to={item.url}>
-                              <item.icon
-                                className={`size-4 ${isActive ? "opacity-100" : "opacity-60"}`}
-                              />
-                              <span
-                                className={
-                                  isActive ? "opacity-100" : "opacity-80"
+                            {isCategoryTab ? (
+                              <Link
+                                to="/"
+                                search={
+                                  item.categoryId &&
+                                  item.categoryId !== DEFAULT_CATEGORY_ID
+                                    ? { category: item.categoryId }
+                                    : {}
                                 }
                               >
-                                {item.translateTitle === false
-                                  ? item.title
-                                  : t(item.title)}
-                              </span>
-                            </Link>
+                                <item.icon
+                                  className={`size-4 ${isActive ? "opacity-100" : "opacity-60"}`}
+                                />
+                                <span
+                                  className={
+                                    isActive ? "opacity-100" : "opacity-80"
+                                  }
+                                >
+                                  {item.translateTitle === false
+                                    ? item.title
+                                    : t(item.title)}
+                                </span>
+                              </Link>
+                            ) : (
+                              <Link to={item.url}>
+                                <item.icon
+                                  className={`size-4 ${isActive ? "opacity-100" : "opacity-60"}`}
+                                />
+                                <span
+                                  className={
+                                    isActive ? "opacity-100" : "opacity-80"
+                                  }
+                                >
+                                  {item.translateTitle === false
+                                    ? item.title
+                                    : t(item.title)}
+                                </span>
+                              </Link>
+                            )}
                           </SidebarMenuButton>
                         </SidebarMenuItem>
                       )
                     })}
+                    {groupIndex === 0 && (
+                      <SidebarMenuItem key="create-category">
+                        <SidebarMenuButton
+                          onClick={() => setCreateOpen(true)}
+                          className="text-muted-foreground hover:bg-muted/60 h-9 px-3"
+                        >
+                          <IconPlus className="size-4 opacity-60" />
+                          <span className="opacity-80">
+                            {t("categories.createNew")}
+                          </span>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    )}
                     {group.isChannelsGroup && hasMoreChannels && (
                       <SidebarMenuItem key="channels-more-toggle">
                         <SidebarMenuButton
@@ -287,6 +423,44 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         ))}
       </SidebarContent>
       <SidebarRail />
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{t("categories.createNew")}</DialogTitle>
+          </DialogHeader>
+          <Input
+            value={newCategoryName}
+            placeholder={t("categories.namePlaceholder")}
+            maxLength={40}
+            onChange={(event) => setNewCategoryName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault()
+                void handleCreateCategory()
+              }
+            }}
+            autoFocus
+          />
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setCreateOpen(false)
+                setNewCategoryName("")
+              }}
+            >
+              {t("categories.cancel")}
+            </Button>
+            <Button
+              onClick={() => void handleCreateCategory()}
+              disabled={!newCategoryName.trim() || creating}
+            >
+              {creating ? t("categories.creating") : t("categories.create")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Sidebar>
   )
 }

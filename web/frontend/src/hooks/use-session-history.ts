@@ -1,18 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
-import { type SessionSummary, deleteSession, getSessions, favoriteSession, unfavoriteSession, renameSession } from "@/api/sessions"
+import { type SessionSummary, deleteSession, getSessions, favoriteSession, unfavoriteSession, renameSession, setSessionCategory } from "@/api/sessions"
 
 const LIMIT = 20
 
 interface UseSessionHistoryOptions {
   activeSessionId: string
   onDeletedActiveSession: () => void
+  /** Category filter; empty/undefined means default category. */
+  category?: string
 }
 
 export function useSessionHistory({
   activeSessionId,
   onDeletedActiveSession,
+  category,
 }: UseSessionHistoryOptions) {
   const { t } = useTranslation()
   const observerRef = useRef<HTMLDivElement>(null)
@@ -21,6 +24,9 @@ export function useSessionHistory({
   const [hasMore, setHasMore] = useState(true)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
   const [loadError, setLoadError] = useState(false)
+
+  // Normalize: undefined/null → "default" for the API filter.
+  const categoryFilter = category && category !== "" ? category : "default"
 
   const loadSessions = useCallback(
     async (reset = true) => {
@@ -32,7 +38,7 @@ export function useSessionHistory({
           setOffset(0)
         }
 
-        const data = await getSessions(currentOffset, LIMIT)
+        const data = await getSessions(currentOffset, LIMIT, categoryFilter)
         setLoadError(false)
 
         if (data.length < LIMIT) {
@@ -60,8 +66,13 @@ export function useSessionHistory({
         setIsLoadingMore(false)
       }
     },
-    [offset],
+    [offset, categoryFilter],
   )
+
+  // Reset and reload when the active category changes.
+  useEffect(() => {
+    void loadSessions(true)
+  }, [categoryFilter]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!observerRef.current || !hasMore || isLoadingMore || loadError) return
@@ -145,6 +156,34 @@ export function useSessionHistory({
     [],
   )
 
+  const handleMoveSession = useCallback(
+    async (id: string, targetCategory: string) => {
+      try {
+        await setSessionCategory(id, targetCategory)
+        // If the session left the current view, remove it and fix pagination.
+        const stillVisible =
+          targetCategory === categoryFilter ||
+          (categoryFilter === "default" && targetCategory === "")
+        if (!stillVisible) {
+          setSessions((prev) => prev.filter((s) => s.id !== id))
+          setOffset((prev) => Math.max(prev - 1, 0))
+        } else {
+          setSessions((prev) =>
+            prev.map((s) =>
+              s.id === id
+                ? { ...s, category: targetCategory === "default" ? "" : targetCategory }
+                : s,
+            ),
+          )
+        }
+      } catch (err) {
+        console.error("Failed to move session:", err)
+        throw err
+      }
+    },
+    [categoryFilter],
+  )
+
   return {
     sessions,
     hasMore,
@@ -155,5 +194,6 @@ export function useSessionHistory({
     handleDeleteSession,
     handleToggleFavorite,
     handleRenameSession,
+    handleMoveSession,
   }
 }

@@ -15,6 +15,18 @@
     "config": "配置",
     "logs": "日志"
   },
+  "categories": {
+    "default": "默认",
+    "createNew": "新建分类",
+    "create": "创建",
+    "creating": "创建中…",
+    "cancel": "取消",
+    "namePlaceholder": "输入分类名称",
+    "duplicateName": "分类名称已存在",
+    "createFailed": "创建分类失败",
+    "moveCategory": "移动到分类",
+    "moveCategoryFailed": "移动分类失败"
+  },
   "launcherLogin": {
     "title": "登录",
     "description": "请输入控制台密码以继续。",

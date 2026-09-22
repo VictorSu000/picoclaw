@@ -36,6 +36,7 @@ func (h *Handler) registerSessionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/sessions/{id}/favorite", h.handleUnfavoriteSession)
 	mux.HandleFunc("POST /api/sessions/{id}/fork", h.handleForkSession)
 	mux.HandleFunc("POST /api/sessions/{id}/rename", h.handleRenameSession)
+	h.registerCategoryRoutes(mux)
 }
 
 // sessionFile mirrors the on-disk session JSON structure from pkg/session.
@@ -65,6 +66,8 @@ type sessionListItem struct {
 	Created      string `json:"created"`
 	Updated      string `json:"updated"`
 	IsFavorited  bool   `json:"is_favorited"`
+	// Category is empty for the default category.
+	Category string `json:"category"`
 }
 
 type sessionChatMessage struct {
@@ -518,6 +521,7 @@ func buildSessionListItem(sessionID string, sess sessionFile, meta memory.Sessio
 		Created:      sess.Created.Format(time.RFC3339),
 		Updated:      sess.Updated.Format(time.RFC3339),
 		IsFavorited:  meta.Favorited,
+		Category:     strings.TrimSpace(meta.Category),
 	}
 }
 
@@ -939,6 +943,27 @@ func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
 			seen[ref.ID] = struct{}{}
 			items = append(items, buildSessionListItem(ref.ID, sess, memory.SessionMeta{}, toolFeedbackMaxArgsLength))
 		}
+	}
+
+	// Optional category filter (applied before pagination).
+	// Missing param returns all sessions (backward compatible).
+	// "default" matches sessions with an empty/absent category field.
+	categoryFilter := strings.TrimSpace(r.URL.Query().Get("category"))
+	if categoryFilter != "" {
+		filtered := items[:0]
+		for i := range items {
+			itemCategory := strings.TrimSpace(items[i].Category)
+			if categoryFilter == defaultCategoryID {
+				if itemCategory == "" {
+					filtered = append(filtered, items[i])
+				}
+				continue
+			}
+			if itemCategory == categoryFilter {
+				filtered = append(filtered, items[i])
+			}
+		}
+		items = filtered
 	}
 
 	// Sort by favorited descending (favorited first), then by updated descending (most recent first)
@@ -1916,6 +1941,15 @@ func (h *Handler) handleForkSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Inherit the source session's category (empty = default).
+	sourceCategory := ""
+	if refErr == nil {
+		sourceMetaPath := filepath.Join(dir, sanitizeSessionKey(ref.Key)+".meta.json")
+		if sourceMeta, metaErr := h.readSessionMeta(sourceMetaPath, ref.Key); metaErr == nil {
+			sourceCategory = strings.TrimSpace(sourceMeta.Category)
+		}
+	}
+
 	meta := memory.SessionMeta{
 		Key:                 newSessionKey,
 		AgentPreset:         sess.AgentPreset,
@@ -1925,6 +1959,7 @@ func (h *Handler) handleForkSession(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:           now,
 		Scope:               scopeData,
 		Aliases:             append([]string(nil), allocation.SessionAliases...),
+		Category:            sourceCategory,
 	}
 
 	metaData, err := json.MarshalIndent(meta, "", "  ")

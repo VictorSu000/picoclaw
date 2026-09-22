@@ -1,7 +1,7 @@
 import { getDefaultStore } from "jotai"
 import { toast } from "sonner"
 
-import { deleteMessageSeries, forkSession } from "@/api/sessions"
+import { deleteMessageSeries, forkSession, setSessionCategory } from "@/api/sessions"
 import {
   loadSessionMessages,
   mergeHistoryMessages,
@@ -456,7 +456,7 @@ export async function switchChatSession(sessionId: string) {
   }
 }
 
-export async function newChatSession() {
+export async function newChatSession(category?: string) {
   const currentState = getChatState()
   if (
     currentState.messages.length === 0 &&
@@ -466,7 +466,8 @@ export async function newChatSession() {
   }
 
   disconnectChatInternal({ clearDesiredConnection: false })
-  setActiveSessionId(generateSessionId())
+  const newId = generateSessionId()
+  setActiveSessionId(newId)
   updateChatStore({
     messages: [],
     isTyping: false,
@@ -478,6 +479,17 @@ export async function newChatSession() {
     agentPresetOverride: false,
     effectiveModelName: undefined,
   })
+
+  // Bind the new session to the active sidebar category (skip default —
+  // empty/absent category field already means default on the backend).
+  const targetCategory = (category ?? "").trim()
+  if (targetCategory !== "" && targetCategory !== "default") {
+    try {
+      await setSessionCategory(newId, targetCategory)
+    } catch (error) {
+      console.error("Failed to bind session category:", error)
+    }
+  }
 
   if (store.get(gatewayAtom).status === "running") {
     shouldMaintainConnection = true

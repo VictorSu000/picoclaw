@@ -6,6 +6,7 @@ import {
   IconPlus,
   IconTrash,
 } from "@tabler/icons-react"
+import { getRouteApi } from "@tanstack/react-router"
 import { useAtom } from "jotai"
 import {
   type ChangeEvent,
@@ -19,6 +20,8 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
 import { deleteChatFile, uploadChatFile } from "@/api/chat-media"
+import { getCategories, type Category } from "@/api/categories"
+import { setSessionCategory } from "@/api/sessions"
 import { AssistantMessage } from "@/components/chat/assistant-message"
 import {
   ChatComposer,
@@ -74,6 +77,8 @@ import {
   shouldShowAssistantMessage,
 } from "@/store/chat"
 import type { GatewayState } from "@/store/gateway"
+
+const chatRouteApi = getRouteApi("/")
 
 function resolveChatInputDisabledReason({
   hasDefaultModel,
@@ -420,6 +425,8 @@ export function ChatPage() {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [isAtBottom, setIsAtBottom] = useState(true)
   const [hasScrolled, setHasScrolled] = useState(false)
+  const { category: activeCategory } = chatRouteApi.useSearch()
+  const [categories, setCategories] = useState<Category[]>([])
   const [assistantDetailVisibility, setAssistantDetailVisibility] = useAtom(
     assistantDetailVisibilityAtom,
   )
@@ -448,6 +455,7 @@ export function ChatPage() {
     agentPresetName,
     agentPresetOverride,
     effectiveModelName: storedEffectiveModelName,
+    hasHydratedActiveSession,
     sendMessage,
     switchSession,
     newChat,
@@ -501,10 +509,74 @@ export function ChatPage() {
     handleDeleteSession,
     handleToggleFavorite,
     handleRenameSession,
+    handleMoveSession,
   } = useSessionHistory({
     activeSessionId,
-    onDeletedActiveSession: newChat,
+    onDeletedActiveSession: () => newChat(activeCategory),
+    category: activeCategory,
   })
+
+  // Load categories for the "move to category" submenu.
+  useEffect(() => {
+    let cancelled = false
+    void getCategories()
+      .then((data) => {
+        if (!cancelled) setCategories(data)
+      })
+      .catch((err) => {
+        console.error("Failed to load categories:", err)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // When the active chat is still empty (hydrated, zero messages) and the
+  // sidebar category changes, re-bind the draft session so the first message
+  // lands in the visible category. Non-default only on first bind — avoids
+  // creating meta on plain default-tab visits; clearing only happens if this
+  // draft was previously bound to a custom category.
+  const lastDraftRef = useRef<{ sessionId: string; category: string } | null>(
+    null,
+  )
+  useEffect(() => {
+    if (!hasHydratedActiveSession) return
+    if (messages.length > 0) {
+      lastDraftRef.current = null
+      return
+    }
+    const desired = activeCategory || "default"
+    const prev = lastDraftRef.current
+    const sameSession = prev !== null && prev.sessionId === activeSessionId
+    const prevCategory = sameSession ? prev!.category : null
+    if (prevCategory === desired) return
+    lastDraftRef.current = { sessionId: activeSessionId, category: desired }
+
+    if (desired === "default") {
+      if (prevCategory && prevCategory !== "default") {
+        void setSessionCategory(activeSessionId, "").catch(() => {})
+      }
+      return
+    }
+    void setSessionCategory(activeSessionId, desired).catch(() => {})
+  }, [
+    activeCategory,
+    activeSessionId,
+    hasHydratedActiveSession,
+    messages.length,
+  ])
+
+  const handleNewChat = () => {
+    void newChat(activeCategory)
+  }
+
+  const handleMoveToCategory = async (sessionId: string, categoryId: string) => {
+    try {
+      await handleMoveSession(sessionId, categoryId)
+    } catch {
+      toast.error(t("categories.moveCategoryFailed"))
+    }
+  }
 
   const syncScrollState = (element: HTMLDivElement) => {
     const { clientHeight, scrollHeight, scrollTop } = element
@@ -638,7 +710,7 @@ export function ChatPage() {
         <Button
           variant="secondary"
           size="sm"
-          onClick={newChat}
+          onClick={handleNewChat}
           className="h-9 gap-2"
         >
           <IconPlus className="size-4" />
@@ -652,6 +724,7 @@ export function ChatPage() {
           loadError={loadError}
           loadErrorMessage={loadErrorMessage}
           observerRef={observerRef}
+          categories={categories}
           onOpenChange={(open) => {
             if (open) {
               void loadSessions(true)
@@ -661,6 +734,7 @@ export function ChatPage() {
           onDeleteSession={handleDeleteSession}
           onToggleFavorite={handleToggleFavorite}
           onRenameSession={handleRenameSession}
+          onMoveSession={handleMoveToCategory}
         />
       </PageHeader>
 

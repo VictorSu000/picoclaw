@@ -3,12 +3,14 @@ import {
   IconPencil,
   IconStar,
   IconTrash,
+  IconFolder,
 } from "@tabler/icons-react"
 import dayjs from "dayjs"
 import type { PointerEvent as ReactPointerEvent, RefObject } from "react"
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
+import { DEFAULT_CATEGORY_ID, type Category } from "@/api/categories"
 import type { SessionSummary } from "@/api/sessions"
 import { Button } from "@/components/ui/button"
 import {
@@ -26,7 +28,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 
-const ACTIONS_WIDTH = 132
+const ACTIONS_WIDTH = 176
 const SWIPE_AXIS_LOCK = 8
 const SWIPE_SETTLE_THRESHOLD = 40
 
@@ -37,11 +39,13 @@ interface SessionHistoryMenuProps {
   loadError: boolean
   loadErrorMessage: string
   observerRef: RefObject<HTMLDivElement | null>
+  categories: Category[]
   onOpenChange: (open: boolean) => void
   onSwitchSession: (sessionId: string) => void
   onDeleteSession: (sessionId: string) => void
   onToggleFavorite: (sessionId: string, currentlyFavorited: boolean) => void
   onRenameSession: (sessionId: string, title: string) => void
+  onMoveSession: (sessionId: string, categoryId: string) => void | Promise<void>
 }
 
 interface SessionHistoryItemProps {
@@ -52,15 +56,19 @@ interface SessionHistoryItemProps {
   editingSessionId: string | null
   editingTitle: string
   confirmingDeleteId: string | null
+  movingSessionId: string | null
   renameInputRef: RefObject<HTMLInputElement | null>
+  categories: Category[]
   onReveal: (sessionId: string | null) => void
   onSwitchSession: (sessionId: string) => void
   onDeleteSession: (sessionId: string) => void
   onToggleFavorite: (sessionId: string, currentlyFavorited: boolean) => void
   onRenameSession: (sessionId: string, title: string) => void
+  onMoveSession: (sessionId: string, categoryId: string) => void
   onSetEditingSession: (sessionId: string | null) => void
   onSetEditingTitle: (title: string) => void
   onSetConfirmingDelete: (sessionId: string | null) => void
+  onSetMovingSession: (sessionId: string | null) => void
 }
 
 type SwipeAxis = "pending" | "horizontal" | "vertical"
@@ -97,15 +105,19 @@ function SessionHistoryItem({
   editingSessionId,
   editingTitle,
   confirmingDeleteId,
+  movingSessionId,
   renameInputRef,
+  categories,
   onReveal,
   onSwitchSession,
   onDeleteSession,
   onToggleFavorite,
   onRenameSession,
+  onMoveSession,
   onSetEditingSession,
   onSetEditingTitle,
   onSetConfirmingDelete,
+  onSetMovingSession,
 }: SessionHistoryItemProps) {
   const { t } = useTranslation()
   const gestureRef = useRef<SwipeGesture | null>(null)
@@ -116,6 +128,7 @@ function SessionHistoryItem({
   const revealed = revealedSessionId === session.id
   const settledOffset = revealed ? ACTIONS_WIDTH : 0
   const currentOffset = isDragging ? dragOffset : settledOffset
+  const sessionCategory = session.category?.trim() || DEFAULT_CATEGORY_ID
 
   const markGestureClickSuppressed = () => {
     suppressClickRef.current = true
@@ -255,7 +268,7 @@ function SessionHistoryItem({
             "text-muted-foreground hover:text-muted-foreground",
             mobile
               ? mobileActionClass
-              : `${desktopActionClass} right-16 opacity-0 transition-opacity group-hover:opacity-100`,
+              : `${desktopActionClass} right-[5.5rem] opacity-0 transition-opacity group-hover:opacity-100`,
           )}
           onClick={(event) => {
             event.preventDefault()
@@ -357,6 +370,66 @@ function SessionHistoryItem({
             </div>
           </PopoverContent>
         </Popover>
+        <Popover
+          open={movingSessionId === session.id}
+          modal={true}
+          onOpenChange={(open) => {
+            if (!open) onSetMovingSession(null)
+          }}
+        >
+          <PopoverTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              tabIndex={actionTabIndex}
+              aria-label={t("chat.moveCategory")}
+              className={cn(
+                "text-muted-foreground hover:text-muted-foreground",
+                mobile
+                  ? mobileActionClass
+                  : `${desktopActionClass} right-[8.25rem] opacity-0 transition-opacity group-hover:opacity-100`,
+              )}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                onSetMovingSession(session.id)
+              }}
+            >
+              <IconFolder className="h-3.5 w-3.5" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="end"
+            side="left"
+            sideOffset={8}
+            className="w-48 p-1"
+            onClick={(event) => event.stopPropagation()}
+          >
+            {categories.map((cat) => {
+              const label =
+                cat.id === DEFAULT_CATEGORY_ID
+                  ? t("categories.default")
+                  : cat.name
+              const isCurrent = cat.id === sessionCategory
+              return (
+                <button
+                  key={cat.id}
+                  type="button"
+                  disabled={isCurrent}
+                  className="hover:bg-accent w-full rounded-sm px-2 py-1.5 text-left text-sm disabled:opacity-50"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onReveal(null)
+                    onSetMovingSession(null)
+                    onMoveSession(session.id, cat.id)
+                  }}
+                >
+                  {label}
+                </button>
+              )
+            })}
+          </PopoverContent>
+        </Popover>
       </>
     )
   }
@@ -367,7 +440,7 @@ function SessionHistoryItem({
         "group relative my-0.5",
         swipeEnabled
           ? "block overflow-hidden p-0"
-          : "flex flex-col items-start gap-0.5 pr-14",
+          : "flex flex-col items-start gap-0.5 pr-[11rem]",
         !swipeEnabled && active && "bg-accent",
       )}
       onClick={handleItemClick}
@@ -381,7 +454,7 @@ function SessionHistoryItem({
         <div
           aria-hidden={!revealed}
           className={cn(
-            "bg-muted/50 absolute inset-y-0 right-0 z-0 flex w-[132px] items-stretch",
+            "bg-muted/50 absolute inset-y-0 right-0 z-0 flex w-[176px] items-stretch",
             revealed || isDragging ? "visible" : "invisible",
             revealed && !isDragging
               ? "pointer-events-auto"
@@ -471,11 +544,13 @@ export function SessionHistoryMenu({
   loadError,
   loadErrorMessage,
   observerRef,
+  categories,
   onOpenChange,
   onSwitchSession,
   onDeleteSession,
   onToggleFavorite,
   onRenameSession,
+  onMoveSession,
 }: SessionHistoryMenuProps) {
   const { t } = useTranslation()
   const swipeEnabled = useSwipeActionMode()
@@ -485,6 +560,7 @@ export function SessionHistoryMenu({
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(
     null,
   )
+  const [movingSessionId, setMovingSessionId] = useState<string | null>(null)
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState("")
   const renameInputRef = useRef<HTMLInputElement>(null)
@@ -497,6 +573,7 @@ export function SessionHistoryMenu({
     if (!open) {
       setRevealedSessionId(null)
       setConfirmingDeleteId(null)
+      setMovingSessionId(null)
       setEditingSessionId(null)
     }
     onOpenChange(open)
@@ -536,15 +613,19 @@ export function SessionHistoryMenu({
                 editingSessionId={editingSessionId}
                 editingTitle={editingTitle}
                 confirmingDeleteId={confirmingDeleteId}
+                movingSessionId={movingSessionId}
                 renameInputRef={renameInputRef}
+                categories={categories}
                 onReveal={setRevealedSessionId}
                 onSwitchSession={onSwitchSession}
                 onDeleteSession={onDeleteSession}
                 onToggleFavorite={onToggleFavorite}
                 onRenameSession={onRenameSession}
+                onMoveSession={onMoveSession}
                 onSetEditingSession={setEditingSessionId}
                 onSetEditingTitle={setEditingTitle}
                 onSetConfirmingDelete={setConfirmingDeleteId}
+                onSetMovingSession={setMovingSessionId}
               />
             ))
           )}

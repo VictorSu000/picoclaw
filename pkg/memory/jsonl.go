@@ -70,6 +70,8 @@ type SessionMeta struct {
 	Scope               json.RawMessage `json:"scope,omitempty"`
 	Aliases             []string        `json:"aliases,omitempty"`
 	Favorited           bool            `json:"favorited,omitempty"`
+	// Category groups Web UI conversations. Empty means the default category.
+	Category string `json:"category,omitempty"`
 }
 
 // SetSessionAgentPreset updates only the request-time agent preset selection
@@ -157,6 +159,35 @@ func (s *JSONLStore) SetSessionTitle(
 		return false, err
 	}
 	return true, nil
+}
+
+// SetSessionCategory updates a session's category while preserving all other
+// metadata. An empty category clears the field (the session falls back to the
+// default category).
+func (s *JSONLStore) SetSessionCategory(
+	_ context.Context,
+	sessionKey string,
+	category string,
+) error {
+	l := s.sessionLock(sessionKey)
+	l.Lock()
+	defer l.Unlock()
+
+	meta, err := s.readMeta(sessionKey)
+	if err != nil {
+		return err
+	}
+	category = strings.TrimSpace(category)
+	if meta.Category == category {
+		return nil
+	}
+	meta.Category = category
+	now := time.Now()
+	if meta.CreatedAt.IsZero() {
+		meta.CreatedAt = now
+	}
+	meta.UpdatedAt = now
+	return s.writeMeta(sessionKey, meta)
 }
 
 // JSONLStore implements Store using append-only JSONL files.

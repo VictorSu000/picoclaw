@@ -15,6 +15,18 @@
     "config": "Config",
     "logs": "Logs"
   },
+  "categories": {
+    "default": "Default",
+    "createNew": "New category",
+    "create": "Create",
+    "creating": "Creating…",
+    "cancel": "Cancel",
+    "namePlaceholder": "Enter category name",
+    "duplicateName": "Category name already exists",
+    "createFailed": "Failed to create category",
+    "moveCategory": "Move to category",
+    "moveCategoryFailed": "Failed to move category"
+  },
   "launcherLogin": {
     "title": "Sign in",
     "description": "Enter the dashboard password to continue.",
