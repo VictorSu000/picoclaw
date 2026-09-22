@@ -1162,7 +1162,7 @@ func (h *Handler) handleFavoriteSession(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if err := h.toggleSessionFavorite(sessionID, true); err != nil {
+	if err := h.toggleSessionFavorite(r.Context(), sessionID, true); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			http.Error(w, "session not found", http.StatusNotFound)
 		} else {
@@ -1184,7 +1184,7 @@ func (h *Handler) handleUnfavoriteSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := h.toggleSessionFavorite(sessionID, false); err != nil {
+	if err := h.toggleSessionFavorite(r.Context(), sessionID, false); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			http.Error(w, "session not found", http.StatusNotFound)
 		} else {
@@ -1255,7 +1255,7 @@ func (h *Handler) handleRenameSession(w http.ResponseWriter, r *http.Request) {
 }
 
 // toggleSessionFavorite updates the favorite status of a session.
-func (h *Handler) toggleSessionFavorite(sessionID string, favorited bool) error {
+func (h *Handler) toggleSessionFavorite(ctx context.Context, sessionID string, favorited bool) error {
 	dir, err := h.sessionsDir()
 	if err != nil {
 		return err
@@ -1264,26 +1264,12 @@ func (h *Handler) toggleSessionFavorite(sessionID string, favorited bool) error 
 	// Try to find JSONL session first
 	ref, refErr := h.findPicoJSONLSession(dir, sessionID)
 	if refErr == nil {
-		base := filepath.Join(dir, sanitizeSessionKey(ref.Key))
-		metaPath := base + ".meta.json"
-
-		meta, err := h.readSessionMeta(metaPath, ref.Key)
-		if err != nil {
-			meta = memory.SessionMeta{Key: ref.Key}
-		}
-
-		meta.Favorited = favorited
-
-		data, err := json.MarshalIndent(meta, "", "  ")
+		store, err := memory.NewJSONLStore(dir)
 		if err != nil {
 			return err
 		}
-
-		if err := os.WriteFile(metaPath, data, 0o644); err != nil {
-			return err
-		}
-
-		return nil
+		defer store.Close()
+		return store.SetSessionFavorite(ctx, ref.Key, favorited)
 	}
 
 	// Try legacy session (read-only, can't favorite)

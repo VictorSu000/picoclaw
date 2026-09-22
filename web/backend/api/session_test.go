@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -1770,5 +1771,98 @@ func TestHandleSessions_IgnoresMetaJSONInLegacyFallback(t *testing.T) {
 	}
 	if len(items) != 0 {
 		t.Fatalf("len(items) = %d, want 0", len(items))
+	}
+}
+
+func TestHandleFavoriteSession_PreservesSessionMetadata(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	const sessionID = "fav-preserve-meta"
+	dir := sessionsTestDir(t, configPath)
+	store, err := memory.NewJSONLStore(dir)
+	if err != nil {
+		t.Fatalf("NewJSONLStore() error = %v", err)
+	}
+	sessionKey := legacyPicoSessionPrefix + sessionID
+	ctx := context.Background()
+	if err := store.AddFullMessage(ctx, sessionKey, providers.Message{
+		Role:    "user",
+		Content: "preserve this message",
+	}); err != nil {
+		t.Fatalf("AddFullMessage() error = %v", err)
+	}
+	if err := store.SetSummary(ctx, sessionKey, "preserve this summary"); err != nil {
+		t.Fatalf("SetSummary() error = %v", err)
+	}
+	if _, err := store.SetSessionTitle(ctx, sessionKey, "preserve title", true); err != nil {
+		t.Fatalf("SetSessionTitle() error = %v", err)
+	}
+	if err := store.SetSessionCategory(ctx, sessionKey, "cat_work"); err != nil {
+		t.Fatalf("SetSessionCategory() error = %v", err)
+	}
+	before, err := store.GetSessionMeta(ctx, sessionKey)
+	if err != nil {
+		t.Fatalf("GetSessionMeta(before) error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/favorite", nil)
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("favorite status = %d, want %d, body=%s", rec.Code, http.StatusNoContent, rec.Body.String())
+	}
+
+	after, err := store.GetSessionMeta(ctx, sessionKey)
+	if err != nil {
+		t.Fatalf("GetSessionMeta(after) error = %v", err)
+	}
+	if !after.Favorited {
+		t.Fatal("Favorited = false, want true")
+	}
+	if after.Category != before.Category || after.Title != before.Title ||
+		after.Summary != before.Summary || after.Count != before.Count ||
+		after.Skip != before.Skip {
+		t.Fatalf("metadata changed: before=%#v after=%#v", before, after)
+	}
+}
+
+func TestHandleFavoriteSession_CorruptMetaDoesNotWipe(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	const sessionID = "fav-corrupt-meta"
+	dir := sessionsTestDir(t, configPath)
+	sessionKey := legacyPicoSessionPrefix + sessionID
+	base := filepath.Join(dir, sanitizeSessionKey(sessionKey))
+	if err := os.WriteFile(base+".jsonl", []byte(`{"role":"user","content":"hi"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(jsonl) error = %v", err)
+	}
+	corrupt := []byte("{not-json")
+	if err := os.WriteFile(base+".meta.json", corrupt, 0o644); err != nil {
+		t.Fatalf("WriteFile(meta) error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/favorite", nil)
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("favorite status = %d, want %d, body=%s", rec.Code, http.StatusInternalServerError, rec.Body.String())
+	}
+
+	got, err := os.ReadFile(base + ".meta.json")
+	if err != nil {
+		t.Fatalf("ReadFile(meta) error = %v", err)
+	}
+	if string(got) != string(corrupt) {
+		t.Fatalf("meta rewritten on error:\n got=%q\nwant=%q", got, corrupt)
 	}
 }

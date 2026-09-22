@@ -190,6 +190,34 @@ func (s *JSONLStore) SetSessionCategory(
 	return s.writeMeta(sessionKey, meta)
 }
 
+// SetSessionFavorite updates the favorite mark while preserving all other
+// metadata. Read/decode failures are returned as errors — the meta file is
+// never replaced with an empty object.
+func (s *JSONLStore) SetSessionFavorite(
+	_ context.Context,
+	sessionKey string,
+	favorited bool,
+) error {
+	l := s.sessionLock(sessionKey)
+	l.Lock()
+	defer l.Unlock()
+
+	meta, err := s.readMeta(sessionKey)
+	if err != nil {
+		return err
+	}
+	if meta.Favorited == favorited {
+		return nil
+	}
+	meta.Favorited = favorited
+	now := time.Now()
+	if meta.CreatedAt.IsZero() {
+		meta.CreatedAt = now
+	}
+	meta.UpdatedAt = now
+	return s.writeMeta(sessionKey, meta)
+}
+
 // JSONLStore implements Store using append-only JSONL files.
 //
 // Each session is stored as two files:

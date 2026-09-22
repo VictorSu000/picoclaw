@@ -124,6 +124,85 @@ func TestSetSessionTitle_ConditionalAndOverwrite(t *testing.T) {
 	}
 }
 
+func TestSetSessionFavorite_PreservesOtherMetadata(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	sessionKey := "fav-preserve"
+
+	if err := store.AddMessage(ctx, sessionKey, "user", "hello"); err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+	if err := store.SetSummary(ctx, sessionKey, "keep summary"); err != nil {
+		t.Fatalf("SetSummary: %v", err)
+	}
+	if _, err := store.SetSessionTitle(ctx, sessionKey, "keep title", true); err != nil {
+		t.Fatalf("SetSessionTitle: %v", err)
+	}
+	if err := store.SetSessionCategory(ctx, sessionKey, "cat_work"); err != nil {
+		t.Fatalf("SetSessionCategory: %v", err)
+	}
+	before, err := store.GetSessionMeta(ctx, sessionKey)
+	if err != nil {
+		t.Fatalf("GetSessionMeta(before): %v", err)
+	}
+
+	if err := store.SetSessionFavorite(ctx, sessionKey, true); err != nil {
+		t.Fatalf("SetSessionFavorite(true): %v", err)
+	}
+	after, err := store.GetSessionMeta(ctx, sessionKey)
+	if err != nil {
+		t.Fatalf("GetSessionMeta(after): %v", err)
+	}
+	if !after.Favorited {
+		t.Fatal("Favorited = false, want true")
+	}
+	if after.Category != before.Category || after.Title != before.Title ||
+		after.Summary != before.Summary || after.Count != before.Count ||
+		after.Skip != before.Skip {
+		t.Fatalf("metadata changed: before=%#v after=%#v", before, after)
+	}
+
+	if err := store.SetSessionFavorite(ctx, sessionKey, false); err != nil {
+		t.Fatalf("SetSessionFavorite(false): %v", err)
+	}
+	after, err = store.GetSessionMeta(ctx, sessionKey)
+	if err != nil {
+		t.Fatalf("GetSessionMeta(unfav): %v", err)
+	}
+	if after.Favorited {
+		t.Fatal("Favorited = true after unfavorite")
+	}
+	if after.Category != "cat_work" || after.Title != "keep title" {
+		t.Fatalf("unfavorite clobbered fields: %#v", after)
+	}
+}
+
+func TestSetSessionFavorite_CorruptMetaReturnsErrorWithoutWipe(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	sessionKey := "fav-corrupt"
+
+	if err := store.AddMessage(ctx, sessionKey, "user", "hello"); err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+	corrupt := []byte("{not-json")
+	if err := os.WriteFile(store.metaPath(sessionKey), corrupt, 0o644); err != nil {
+		t.Fatalf("WriteFile(corrupt meta): %v", err)
+	}
+
+	if err := store.SetSessionFavorite(ctx, sessionKey, true); err == nil {
+		t.Fatal("SetSessionFavorite() error = nil, want decode error")
+	}
+
+	got, err := os.ReadFile(store.metaPath(sessionKey))
+	if err != nil {
+		t.Fatalf("ReadFile(meta): %v", err)
+	}
+	if string(got) != string(corrupt) {
+		t.Fatalf("meta rewritten on error:\n got=%q\nwant=%q", got, corrupt)
+	}
+}
+
 func TestAddFullMessage_WithToolCalls(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
