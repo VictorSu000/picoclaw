@@ -254,122 +254,15 @@ function SessionHistoryItem({
   const renderActions = (mobile: boolean) => {
     const mobileActionClass =
       "h-full w-11 shrink-0 rounded-none border-l border-border/60"
-    const desktopActionClass = "absolute top-1/2 h-6 w-6 -translate-y-1/2"
+    const desktopActionClass = "h-6 w-6 shrink-0"
+    const actionClass = cn(
+      "text-muted-foreground hover:text-muted-foreground",
+      mobile ? mobileActionClass : desktopActionClass,
+    )
     const actionTabIndex = mobile ? (revealed ? 0 : -1) : undefined
 
     return (
       <>
-        <Button
-          variant="ghost"
-          size="icon"
-          tabIndex={actionTabIndex}
-          aria-label={t("chat.renameSession")}
-          className={cn(
-            "text-muted-foreground hover:text-muted-foreground",
-            mobile
-              ? mobileActionClass
-              : `${desktopActionClass} right-[5.5rem] opacity-0 transition-opacity group-hover:opacity-100`,
-          )}
-          onClick={(event) => {
-            event.preventDefault()
-            event.stopPropagation()
-            onReveal(null)
-            onSetEditingSession(session.id)
-            onSetEditingTitle(session.title)
-          }}
-        >
-          <IconPencil className="h-3.5 w-3.5" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          tabIndex={actionTabIndex}
-          aria-label={
-            session.is_favorited
-              ? t("chat.unfavoriteSession")
-              : t("chat.favoriteSession")
-          }
-          className={cn(
-            "text-muted-foreground hover:text-muted-foreground",
-            mobile
-              ? mobileActionClass
-              : `${desktopActionClass} right-9 transition-opacity ${session.is_favorited ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`,
-          )}
-          onClick={(event) => {
-            event.preventDefault()
-            event.stopPropagation()
-            onReveal(null)
-            onToggleFavorite(session.id, session.is_favorited)
-          }}
-        >
-          <IconStar
-            className="h-4 w-4"
-            fill={session.is_favorited ? "currentColor" : "none"}
-          />
-        </Button>
-        <Popover
-          open={confirmingDeleteId === session.id}
-          modal={true}
-          onOpenChange={(open) => {
-            if (!open) onSetConfirmingDelete(null)
-          }}
-        >
-          <PopoverTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              tabIndex={actionTabIndex}
-              aria-label={t("chat.deleteSession")}
-              className={cn(
-                mobile
-                  ? `${mobileActionClass} bg-destructive/10 text-destructive hover:bg-destructive/20 hover:text-destructive`
-                  : `text-muted-foreground hover:bg-destructive/10 hover:text-destructive ${desktopActionClass} right-2 opacity-0 transition-opacity group-hover:opacity-100`,
-              )}
-              onClick={(event) => {
-                event.preventDefault()
-                event.stopPropagation()
-                onSetConfirmingDelete(session.id)
-              }}
-            >
-              <IconTrash className="h-4 w-4" />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent
-            align="end"
-            side="left"
-            sideOffset={8}
-            className="w-56 p-3"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <p className="mb-3 text-sm leading-relaxed">
-              {t("chat.deleteSessionConfirm")}
-            </p>
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  onSetConfirmingDelete(null)
-                }}
-              >
-                {t("chat.deleteSessionCancel")}
-              </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  onReveal(null)
-                  onDeleteSession(session.id)
-                  onSetConfirmingDelete(null)
-                }}
-              >
-                {t("chat.deleteSessionConfirmButton")}
-              </Button>
-            </div>
-          </PopoverContent>
-        </Popover>
         <Popover
           open={movingSessionId === session.id}
           modal={true}
@@ -382,13 +275,8 @@ function SessionHistoryItem({
               variant="ghost"
               size="icon"
               tabIndex={actionTabIndex}
-              aria-label={t("chat.moveCategory")}
-              className={cn(
-                "text-muted-foreground hover:text-muted-foreground",
-                mobile
-                  ? mobileActionClass
-                  : `${desktopActionClass} right-[8.25rem] opacity-0 transition-opacity group-hover:opacity-100`,
-              )}
+              aria-label={t("categories.moveCategory")}
+              className={actionClass}
               onClick={(event) => {
                 event.preventDefault()
                 event.stopPropagation()
@@ -430,6 +318,107 @@ function SessionHistoryItem({
             })}
           </PopoverContent>
         </Popover>
+        <Button
+          variant="ghost"
+          size="icon"
+          tabIndex={actionTabIndex}
+          aria-label={t("chat.renameSession")}
+          className={actionClass}
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            onReveal(null)
+            onSetEditingSession(session.id)
+            onSetEditingTitle(session.title)
+          }}
+        >
+          <IconPencil className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          tabIndex={actionTabIndex}
+          aria-label={
+            session.is_favorited
+              ? t("chat.unfavoriteSession")
+              : t("chat.favoriteSession")
+          }
+          className={actionClass}
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            onReveal(null)
+            onToggleFavorite(session.id, session.is_favorited)
+          }}
+        >
+          <IconStar
+            className="h-3.5 w-3.5"
+            fill={session.is_favorited ? "currentColor" : "none"}
+          />
+        </Button>
+        <Popover
+          open={confirmingDeleteId === session.id}
+          modal={true}
+          onOpenChange={(open) => {
+            if (!open) onSetConfirmingDelete(null)
+          }}
+        >
+          <PopoverTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              tabIndex={actionTabIndex}
+              aria-label={t("chat.deleteSession")}
+              className={cn(
+                mobile
+                  ? `${mobileActionClass} bg-destructive/10 text-destructive hover:bg-destructive/20 hover:text-destructive`
+                  : `text-muted-foreground hover:bg-destructive/10 hover:text-destructive ${desktopActionClass}`,
+              )}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                onSetConfirmingDelete(session.id)
+              }}
+            >
+              <IconTrash className="h-3.5 w-3.5" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="end"
+            side="left"
+            sideOffset={8}
+            className="w-56 p-3"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p className="mb-3 text-sm leading-relaxed">
+              {t("chat.deleteSessionConfirm")}
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onSetConfirmingDelete(null)
+                }}
+              >
+                {t("chat.deleteSessionCancel")}
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onReveal(null)
+                  onDeleteSession(session.id)
+                  onSetConfirmingDelete(null)
+                }}
+              >
+                {t("chat.deleteSessionConfirmButton")}
+              </Button>
+            </div>
+          </PopoverContent>
+        </Popover>
       </>
     )
   }
@@ -440,7 +429,7 @@ function SessionHistoryItem({
         "group relative my-0.5",
         swipeEnabled
           ? "block overflow-hidden p-0"
-          : "flex flex-col items-start gap-0.5 pr-[11rem]",
+          : "flex flex-col items-start gap-0.5",
         !swipeEnabled && active && "bg-accent",
       )}
       onClick={handleItemClick}
@@ -508,7 +497,7 @@ function SessionHistoryItem({
               autoFocus
             />
           </div>
-        ) : swipeEnabled ? (
+        ) : (
           <div className="flex w-full min-w-0 items-center gap-1">
             {session.is_favorited && (
               <IconStar
@@ -521,10 +510,6 @@ function SessionHistoryItem({
               {session.title}
             </span>
           </div>
-        ) : (
-          <span className="line-clamp-1 text-sm font-medium">
-            {session.title}
-          </span>
         )}
         <span className="text-muted-foreground text-xs">
           {t("chat.messagesCount", { count: session.message_count })} ·{" "}
@@ -532,7 +517,11 @@ function SessionHistoryItem({
         </span>
       </div>
 
-      {!swipeEnabled && renderActions(false)}
+      {!swipeEnabled && editingSessionId !== session.id && (
+        <div className="bg-popover absolute top-1/2 right-1 z-10 flex -translate-y-1/2 items-center gap-0.5 rounded-md p-0.5 opacity-0 shadow-xs transition-opacity pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
+          {renderActions(false)}
+        </div>
+      )}
     </DropdownMenuItem>
   )
 }

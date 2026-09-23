@@ -21,7 +21,7 @@ import { toast } from "sonner"
 
 import { deleteChatFile, uploadChatFile } from "@/api/chat-media"
 import { getCategories, type Category } from "@/api/categories"
-import { setSessionCategory } from "@/api/sessions"
+import { getSessions, setSessionCategory } from "@/api/sessions"
 import { AssistantMessage } from "@/components/chat/assistant-message"
 import {
   ChatComposer,
@@ -565,6 +565,44 @@ export function ChatPage() {
     hasHydratedActiveSession,
     messages.length,
   ])
+
+  // When the sidebar category changes, the open conversation may only keep
+  // occupying the view if it belongs to that category; otherwise start a
+  // fresh chat there. Empty drafts are handled by the re-bind effect above.
+  const categoryGuardRef = useRef(activeCategory)
+  const categoryCheckSeqRef = useRef(0)
+  const activeSessionIdRef = useRef(activeSessionId)
+  useEffect(() => {
+    activeSessionIdRef.current = activeSessionId
+  }, [activeSessionId])
+  useEffect(() => {
+    if (categoryGuardRef.current === activeCategory) return
+    // Wait for hydration so a restored session isn't dropped on load; the
+    // category change stays pending until then.
+    if (!hasHydratedActiveSession) return
+    categoryGuardRef.current = activeCategory
+    if (messages.length === 0) return
+
+    const seq = ++categoryCheckSeqRef.current
+    const checkedSessionId = activeSessionIdRef.current
+    const desired = (activeCategory || "default").trim() || "default"
+    // Generous limit so a session deep inside the category still counts as
+    // belonging (membership is verified independently of the history list).
+    void getSessions(0, 1000, desired)
+      .then((list) => {
+        if (seq !== categoryCheckSeqRef.current) return
+        // A newer category change may have been skipped (empty draft); don't
+        // act with a stale category.
+        if (categoryGuardRef.current !== activeCategory) return
+        // Only act if the open conversation is still the one we checked.
+        if (activeSessionIdRef.current !== checkedSessionId) return
+        if (list.some((item) => item.id === checkedSessionId)) return
+        void newChat(activeCategory)
+      })
+      .catch(() => {
+        // Membership unknown (e.g. network error) — keep the current view.
+      })
+  }, [activeCategory, hasHydratedActiveSession, messages.length, newChat])
 
   const handleNewChat = () => {
     void newChat(activeCategory)
