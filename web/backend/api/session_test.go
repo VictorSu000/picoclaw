@@ -1866,3 +1866,71 @@ func TestHandleFavoriteSession_CorruptMetaDoesNotWipe(t *testing.T) {
 		t.Fatalf("meta rewritten on error:\n got=%q\nwant=%q", got, corrupt)
 	}
 }
+
+func TestHandleGetSession_PreservesGatewayRoutedModelNameForAllMessageKinds(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	dir := sessionsTestDir(t, configPath)
+	store, err := memory.NewJSONLStore(dir)
+	if err != nil {
+		t.Fatalf("NewJSONLStore() error = %v", err)
+	}
+
+	const routedModelName = "my-claude → anthropic/claude-sonnet-4-5"
+	sessionKey := picoSessionPrefix + "detail-gateway-model"
+	for _, msg := range []providers.Message{
+		{Role: "user", Content: "hello"},
+		{
+			Role:             "assistant",
+			Content:          "final visible answer",
+			ModelName:        routedModelName,
+			ReasoningContent: "internal chain of thought",
+			ToolCalls: []providers.ToolCall{{
+				ID:       "call-1",
+				Name:     "list_dir",
+				Function: &providers.FunctionCall{Name: "list_dir", Arguments: "{}"},
+			}},
+		},
+	} {
+		if err := store.AddFullMessage(nil, sessionKey, msg); err != nil {
+			t.Fatalf("AddFullMessage() error = %v", err)
+		}
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/detail-gateway-model", nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp struct {
+		Messages []sessionChatMessage `json:"messages"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+
+	byKind := map[string]sessionChatMessage{}
+	for _, msg := range resp.Messages {
+		if msg.Role == "assistant" {
+			byKind[msg.Kind] = msg
+		}
+	}
+	// "normal" assistant messages are serialized with an empty kind.
+	for _, kind := range []string{"thought", "tool_calls", ""} {
+		got, ok := byKind[kind]
+		if !ok {
+			t.Fatalf("missing assistant message of kind %q in %#v", kind, resp.Messages)
+		}
+		if got.ModelName != routedModelName {
+			t.Fatalf("kind %q model_name = %q, want %q", kind, got.ModelName, routedModelName)
+		}
+	}
+}

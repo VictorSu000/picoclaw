@@ -150,9 +150,18 @@ type turnExecution struct {
 	providerToolDefs    []providers.ToolDefinition
 	llmModel            string
 	llmModelName        string
-	llmOpts             map[string]any
-	gracefulTerminal    bool
-	useNativeSearch     bool
+	// llmUpstreamModel and llmUpstreamProvider are the model and provider a
+	// gateway actually routed the last LLM call to, when the endpoint reports
+	// them. Empty for direct provider calls.
+	llmUpstreamModel    string
+	llmUpstreamProvider string
+	// llmModelLabel is llmModelName decorated with the upstream route. It is
+	// what gets persisted and displayed; llmModelName stays the plain config
+	// alias so it stays safe to compare against resolved model names.
+	llmModelLabel    string
+	llmOpts          map[string]any
+	gracefulTerminal bool
+	useNativeSearch  bool
 
 	// Phase tracking
 	phase LLMPhase
@@ -164,6 +173,66 @@ type turnExecution struct {
 	// Abort signaling for coordinator (set by Pipeline methods)
 	abortedByHardAbort bool // true when hard abort triggered during LLM/tools
 	abortedByHook      bool // true when HookActionAbortTurn triggered
+}
+
+// setModelName records the configured model alias selected for this turn and
+// drops any upstream routing information gathered for the previous model.
+func (e *turnExecution) setModelName(modelName string) {
+	if e == nil {
+		return
+	}
+	e.llmModelName = modelName
+	e.llmUpstreamModel = ""
+	e.llmUpstreamProvider = ""
+	e.llmModelLabel = modelName
+}
+
+// recordUpstreamRoute stores the model and provider a gateway actually routed
+// the current LLM call to, and refreshes the display/persistence label.
+func (e *turnExecution) recordUpstreamRoute(model, provider string) {
+	if e == nil {
+		return
+	}
+	e.llmUpstreamModel = strings.TrimSpace(model)
+	e.llmUpstreamProvider = strings.TrimSpace(provider)
+	e.refreshModelLabel()
+}
+
+// resetUpstreamRoute drops routing information from the previous LLM call.
+// Each call may be routed to a different backend, and every assistant message
+// must reflect the route of the call that produced it.
+func (e *turnExecution) resetUpstreamRoute() {
+	if e == nil {
+		return
+	}
+	e.llmUpstreamModel = ""
+	e.llmUpstreamProvider = ""
+	e.refreshModelLabel()
+}
+
+// refreshModelLabel re-derives the display label after the requested model id
+// changed, so a stale upstream name is never carried across models.
+func (e *turnExecution) refreshModelLabel() {
+	if e == nil {
+		return
+	}
+	e.llmModelLabel = composeModelLabel(
+		e.llmModelName,
+		e.llmModel,
+		e.llmUpstreamModel,
+		e.llmUpstreamProvider,
+	)
+}
+
+// modelLabel returns the label to persist and display for assistant messages.
+func (e *turnExecution) modelLabel() string {
+	if e == nil {
+		return ""
+	}
+	if e.llmModelLabel != "" {
+		return e.llmModelLabel
+	}
+	return e.llmModelName
 }
 
 func (e *turnExecution) addAvailableMedia(refs ...string) {

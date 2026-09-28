@@ -33,7 +33,7 @@ func (p *Pipeline) Finalize(
 		ts.setPhase(TurnPhaseCompleted)
 		return turnResult{
 			finalContent:  finalContent,
-			modelName:     exec.llmModelName,
+			modelName:     exec.modelLabel(),
 			status:        turnStatus,
 			followUps:     append([]bus.InboundMessage(nil), ts.followUps...),
 			emptyResponse: exec.emptyAfterRetries && finalContent == "",
@@ -46,7 +46,7 @@ func (p *Pipeline) Finalize(
 		finalMsg := providers.Message{
 			Role:             "assistant",
 			Content:          finalContent,
-			ModelName:        exec.llmModelName,
+			ModelName:        exec.modelLabel(),
 			ReasoningContent: responseReasoningContent(exec.response),
 		}
 		ts.agent.Sessions.AddFullMessage(ts.sessionKey, finalMsg)
@@ -111,7 +111,7 @@ func (p *Pipeline) Finalize(
 	if ((streamErr != nil && !isConfiguredStreamingVisibleError(streamErr)) || exec.streamingFallback) &&
 		!ts.opts.SendResponse && ts.opts.AllowInterimPicoPublish && finalContent != "" {
 		msg := outboundMessageForTurnWithOptions(ts, finalContent, outboundTurnMessageOptions{
-			modelName: exec.llmModelName,
+			modelName: exec.modelLabel(),
 		})
 		msg.ContextUsage = contextUsage
 		markFinalOutbound(&msg)
@@ -128,7 +128,7 @@ func (p *Pipeline) Finalize(
 	ts.setPhase(TurnPhaseCompleted)
 	return turnResult{
 		finalContent:  finalContent,
-		modelName:     exec.llmModelName,
+		modelName:     exec.modelLabel(),
 		status:        turnStatus,
 		followUps:     append([]bus.InboundMessage(nil), ts.followUps...),
 		emptyResponse: exec.emptyAfterRetries && finalContent == "",

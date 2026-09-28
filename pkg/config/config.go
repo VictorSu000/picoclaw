@@ -798,6 +798,12 @@ type ModelConfig struct {
 	Streaming           ModelStreamingConfig `json:"streaming,omitzero"`              // Opt-in for provider streaming on this model entry
 	ExtraBody           map[string]any       `json:"extra_body,omitempty"`            // Additional fields to inject into request body
 	CustomHeaders       map[string]string    `json:"custom_headers,omitempty"`        // Additional headers to inject into every HTTP request
+	// UpstreamModelHeader and UpstreamProviderHeader are the response headers a
+	// gateway uses to report which model/provider actually served the request
+	// (e.g. "cf-aig-model" and "cf-aig-provider"). When empty, Cloudflare AI
+	// Gateway responses are detected automatically.
+	UpstreamModelHeader    string `json:"upstream_model_header,omitempty"`
+	UpstreamProviderHeader string `json:"upstream_provider_header,omitempty"`
 
 	APIKeys SecureStrings `json:"api_keys,omitzero" yaml:"api_keys,omitempty"` // API authentication keys (multiple keys for failover)
 

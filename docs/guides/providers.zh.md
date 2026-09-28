@@ -128,6 +128,8 @@
 | `thinking_level` | string | 否 | 扩展思考级别：`off`、`low`、`medium`、`high`、`xhigh` 或 `adaptive` |
 | `extra_body` | object | 否 | 注入到每个请求体中的额外字段 |
 | `custom_headers` | object | 否 | 注入到每个请求中的额外 HTTP 请求头（例如 `{"X-Source":"coding-plan"}`）。若键名与内置请求头同名，会覆盖内置值（如 `Authorization`、`User-Agent`、`Content-Type`、`Accept`）。 |
+| `upstream_model_header` | string | 否 | 网关用于回报实际处理请求的模型的响应头（例如 Cloudflare AI Gateway 的 `cf-aig-model`）。设置后，WebUI 会在配置的模型别名旁显示实际调用的模型。留空时自动识别 Cloudflare AI Gateway 响应，其他网关不显示任何额外信息。 |
+| `upstream_provider_header` | string | 否 | 网关用于回报实际处理请求的厂商的响应头（例如 Cloudflare AI Gateway 的 `cf-aig-provider`）。会以 `provider/model` 的形式显示在配置的模型别名旁。 |
 | `rpm` | int | 否 | 每分钟请求速率限制 |
 | `fallbacks` | string[] | 否 | 自动故障转移的备用模型名称 |
 | `enabled` | bool | 否 | 是否启用此模型条目（默认：`true`） |

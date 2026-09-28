@@ -50,10 +50,12 @@ func (p *Pipeline) tryConfiguredStreamingLLM(
 	}
 
 	publisher := &streamingChunkPublisher{
-		streamer:  streamer,
-		channel:   ts.channel,
-		chatID:    ts.chatID,
-		modelName: exec.llmModelName,
+		streamer:   streamer,
+		channel:    ts.channel,
+		chatID:     ts.chatID,
+		modelName:  exec.modelLabel(),
+		aliasName:  exec.llmModelName,
+		requestedM: exec.llmModel,
 	}
 
 	logger.DebugCF("agent", "configured streaming enabled", map[string]any{
@@ -85,6 +87,7 @@ func (p *Pipeline) tryConfiguredStreamingLLM(
 			exec.llmOpts,
 			func(chunk providers.StreamChunk) {
 				recordChunk()
+				publisher.noteUpstreamRoute(chunk.UpstreamModel, chunk.UpstreamProvider)
 				if !exec.suppressReasoning && strings.TrimSpace(chunk.ReasoningContent) != "" {
 					publisher.UpdateReasoning(ctx, chunk.ReasoningContent)
 				}
@@ -377,14 +380,35 @@ func streamingConfigFromDecodedSettings(decoded any) (config.StreamingConfig, bo
 }
 
 type streamingChunkPublisher struct {
-	streamer           bus.Streamer
-	channel            string
-	chatID             string
-	modelName          string
-	published          bool
-	reasoningPublished bool
-	err                error
-	lastContent        string
+	streamer             bus.Streamer
+	channel              string
+	chatID               string
+	modelName            string
+	aliasName            string
+	requestedM           string
+	upstreamModelName    string
+	upstreamProviderSlug string
+	published            bool
+	reasoningPublished   bool
+	err                  error
+	lastContent          string
+}
+
+// noteUpstreamRoute records the model and provider a gateway routed the stream
+// to. It runs before the first chunk is forwarded, so the very first
+// message.create already carries the decorated model name.
+func (p *streamingChunkPublisher) noteUpstreamRoute(model, provider string) {
+	if p == nil {
+		return
+	}
+	trimmedModel := strings.TrimSpace(model)
+	trimmedProvider := strings.TrimSpace(provider)
+	if trimmedModel == p.upstreamModelName && trimmedProvider == p.upstreamProviderSlug {
+		return
+	}
+	p.upstreamModelName = trimmedModel
+	p.upstreamProviderSlug = trimmedProvider
+	p.modelName = composeModelLabel(p.aliasName, p.requestedM, trimmedModel, trimmedProvider)
 }
 
 func (p *streamingChunkPublisher) Update(ctx context.Context, accumulated string) {
@@ -450,6 +474,20 @@ func (p *streamingChunkPublisher) LastContent() string {
 		return ""
 	}
 	return p.lastContent
+}
+
+func (p *streamingChunkPublisher) upstreamModel() string {
+	if p == nil {
+		return ""
+	}
+	return p.upstreamModelName
+}
+
+func (p *streamingChunkPublisher) upstreamProvider() string {
+	if p == nil {
+		return ""
+	}
+	return p.upstreamProviderSlug
 }
 
 func (p *streamingChunkPublisher) Finalize(ctx context.Context, content string, contextUsage *bus.ContextUsage) error {

@@ -179,7 +179,7 @@ func (p *Pipeline) SetupTurn(ctx context.Context, ts *turnState) (*turnExecution
 		activeModel,
 		p.Cfg.Agents.Defaults.Provider,
 	)
-	exec.llmModelName = activeModelName
+	exec.setModelName(activeModelName)
 	exec.activeProvider = activeProvider
 	exec.usedLight = usedLight
 

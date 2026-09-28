@@ -154,6 +154,10 @@ func (p *Pipeline) CallLLM(
 
 	// LLM call closure with fallback support
 	callLLM := func(messagesForCall []providers.Message, toolDefsForCall []providers.ToolDefinition) (*providers.LLMResponse, error) {
+		// Each LLM call may be routed to a different backend, so never carry the
+		// previous call's routing information into this one.
+		exec.resetUpstreamRoute()
+
 		providerCtx, providerCancel := context.WithCancel(turnCtx)
 		ts.setProviderCancel(providerCancel)
 		defer func() {
@@ -175,6 +179,13 @@ func (p *Pipeline) CallLLM(
 			messagesForCall,
 			toolDefsForCall,
 		); handled {
+			if response != nil {
+				exec.recordUpstreamRoute(response.UpstreamModel, response.UpstreamProvider)
+			} else if exec.streamingPublisher != nil {
+				// The stream broke mid-flight; the publisher still learned which
+				// backend the gateway picked from the response headers.
+				exec.recordUpstreamRoute(exec.streamingPublisher.upstreamModel(), exec.streamingPublisher.upstreamProvider())
+			}
 			return response, streamErr
 		}
 
@@ -249,15 +260,26 @@ func (p *Pipeline) CallLLM(
 				if candidate.StableKey() != fbResult.IdentityKey {
 					continue
 				}
-				exec.llmModelName = resolvedCandidateModelName(
+				exec.setModelName(resolvedCandidateModelName(
 					[]providers.FallbackCandidate{candidate},
 					exec.llmModelName,
-				)
+				))
 				break
 			}
+			fbModel, fbProvider := upstreamRouteOf(fbResult.Response)
+			exec.recordUpstreamRoute(fbModel, fbProvider)
 			return fbResult.Response, nil
 		}
-		return exec.activeProvider.Chat(providerCtx, messagesForCall, toolDefsForCall, exec.llmModel, exec.llmOpts)
+		response, err := exec.activeProvider.Chat(
+			providerCtx,
+			messagesForCall,
+			toolDefsForCall,
+			exec.llmModel,
+			exec.llmOpts,
+		)
+		upstreamModel, upstreamProvider := upstreamRouteOf(response)
+		exec.recordUpstreamRoute(upstreamModel, upstreamProvider)
+		return response, err
 	}
 
 	// Retry loop
@@ -579,7 +601,7 @@ func (p *Pipeline) CallLLM(
 			// Publish pico thoughts before the turn context is canceled at return time.
 			// The async variant can race with turn teardown and intermittently drop the
 			// thought message in CI even though the LLM produced reasoning content.
-			al.publishPicoReasoning(turnCtx, reasoningContent, ts.chatID, ts.sessionKey, exec.llmModelName)
+			al.publishPicoReasoning(turnCtx, reasoningContent, ts.chatID, ts.sessionKey, exec.modelLabel())
 		}
 	} else {
 		go al.handleReasoning(
@@ -666,7 +688,7 @@ func (p *Pipeline) CallLLM(
 	assistantMsg := providers.Message{
 		Role:             "assistant",
 		Content:          exec.response.Content,
-		ModelName:        exec.llmModelName,
+		ModelName:        exec.modelLabel(),
 		ReasoningContent: reasoningContent,
 	}
 	for _, tc := range exec.normalizedToolCalls {
@@ -709,7 +731,7 @@ func (p *Pipeline) CallLLM(
 		al.publishPicoToolCallInterim(
 			turnCtx,
 			ts,
-			exec.llmModelName,
+			exec.modelLabel(),
 			reasoningContent,
 			exec.response.Content,
 			assistantMsg.ToolCalls,
@@ -749,6 +771,7 @@ func (p *Pipeline) applyBeforeLLMModelRewrite(ts *turnState, exec *turnExecution
 	exec.activeCandidates = candidates
 	exec.activeModel = resolvedCandidateModel(candidates, rawModel)
 	exec.llmModel = exec.activeModel
+	exec.refreshModelLabel()
 	exec.activeModelConfig = resolveActiveModelConfig(p.Cfg, ts.agent.Workspace, candidates, rawModel, defaultProvider)
 }
 

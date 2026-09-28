@@ -93,6 +93,12 @@ func (p *HTTPProvider) GetDefaultModel() string {
 	return ""
 }
 
+// SetUpstreamRouteHeaders overrides the response headers used to detect the
+// model and provider a gateway actually routed the request to.
+func (p *HTTPProvider) SetUpstreamRouteHeaders(modelHeader, providerHeader string) {
+	p.delegate.SetUpstreamRouteHeaders(modelHeader, providerHeader)
+}
+
 func (p *HTTPProvider) SupportsNativeSearch() bool {
 	return p.delegate.SupportsNativeSearch()
 }

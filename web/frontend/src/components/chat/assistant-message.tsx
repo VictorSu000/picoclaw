@@ -28,6 +28,8 @@ import {
   type ChatToolCall,
 } from "@/store/chat"
 
+import { parseMessageModelLabel } from "./message-model-label"
+
 interface AssistantMessageProps {
   content: string
   attachments?: ChatAttachment[]
@@ -67,7 +69,25 @@ export const AssistantMessage = memo(function AssistantMessage({
   const copyMessageLabel = isCopied
     ? t("chat.copiedLabel")
     : t("chat.copyMessage")
-  const trimmedModelName = modelName?.trim() ?? ""
+  const modelLabel = parseMessageModelLabel(modelName)
+  const modelLabelNode = (
+    <>
+      {modelLabel.configured && <span>{modelLabel.configured}</span>}
+      {modelLabel.routed && (
+        <>
+          <span className="opacity-50">→</span>
+          <span
+            className="text-muted-foreground/70"
+            title={modelLabel.routed}
+          >
+            {modelLabel.routed}
+          </span>
+        </>
+      )}
+    </>
+  )
+  const hasModelLabel =
+    modelLabel.configured !== "" || modelLabel.routed !== ""
 
   return (
     <div className="group flex w-full flex-col gap-1.5">
@@ -75,10 +95,10 @@ export const AssistantMessage = memo(function AssistantMessage({
         <div className="text-muted-foreground/60 flex items-center justify-between gap-2 px-1 text-xs opacity-70">
           <div className="flex items-center gap-2">
             <span>PicoClaw</span>
-            {trimmedModelName && (
+            {hasModelLabel && (
               <>
                 <span className="opacity-50">•</span>
-                <span>{trimmedModelName}</span>
+                {modelLabelNode}
               </>
             )}
             {formattedTimestamp && (
@@ -128,8 +148,10 @@ export const AssistantMessage = memo(function AssistantMessage({
                   <IconTool className="size-3.5" />
                 )}
                 <span>{collapsedLabel}</span>
-                {trimmedModelName && (
-                  <span className="text-muted-foreground/45">{trimmedModelName}</span>
+                {hasModelLabel && (
+                  <span className="text-muted-foreground/45 flex items-center gap-1">
+                    {modelLabelNode}
+                  </span>
                 )}
               </div>
               <div className="flex items-center gap-2">

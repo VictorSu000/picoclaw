@@ -35,11 +35,22 @@ type LLMResponse struct {
 	Usage            *UsageInfo        `json:"usage,omitempty"`
 	Reasoning        string            `json:"reasoning"`
 	ReasoningDetails []ReasoningDetail `json:"reasoning_details"`
+	// UpstreamModel is the model a gateway actually routed the request to, when
+	// the endpoint reports it. Empty for direct provider calls.
+	UpstreamModel string `json:"upstream_model,omitempty"`
+	// UpstreamProvider is the provider slug a gateway actually routed the
+	// request to, when the endpoint reports it (e.g. "anthropic").
+	UpstreamProvider string `json:"upstream_provider,omitempty"`
 }
 
 type StreamChunk struct {
 	Content          string
 	ReasoningContent string
+	// UpstreamModel and UpstreamProvider mirror the LLMResponse fields and are
+	// filled from the very first chunk because gateway routing metadata is
+	// known up front.
+	UpstreamModel    string
+	UpstreamProvider string
 }
 
 type ReasoningDetail struct {

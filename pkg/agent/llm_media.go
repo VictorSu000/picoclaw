@@ -208,7 +208,7 @@ func (p *Pipeline) routeMediaTurn(ts *turnState, exec *turnExecution) error {
 		targetModel,
 		p.Cfg.Agents.Defaults.Provider,
 	)
-	exec.llmModelName = resolvedModelName
+	exec.setModelName(resolvedModelName)
 	exec.usedLight = false
 
 	logger.InfoCF("agent", "Media turn routing selected model", map[string]any{

@@ -373,6 +373,11 @@ func finalizeProviderFromConfig(
 	modelID string,
 	cfg *config.ModelConfig,
 ) (LLMProvider, string, error) {
+	if setter, ok := provider.(interface {
+		SetUpstreamRouteHeaders(modelHeader, providerHeader string)
+	}); ok {
+		setter.SetUpstreamRouteHeaders(cfg.UpstreamModelHeader, cfg.UpstreamProviderHeader)
+	}
 	wrapped, err := wrapProviderWithToolSchemaTransform(provider, cfg.ToolSchemaTransform)
 	if err != nil {
 		return nil, "", err

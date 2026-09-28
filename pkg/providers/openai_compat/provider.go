@@ -34,15 +34,17 @@ type (
 )
 
 type Provider struct {
-	apiKey         string
-	apiBase        string
-	proxy          string
-	providerName   string
-	maxTokensField string // Field name for max tokens (e.g., "max_completion_tokens" for o1/glm models)
-	httpClient     *http.Client
-	extraBody      map[string]any // Additional fields to inject into request body
-	customHeaders  map[string]string
-	userAgent      string
+	apiKey                 string
+	apiBase                string
+	proxy                  string
+	providerName           string
+	maxTokensField         string // Field name for max tokens (e.g., "max_completion_tokens" for o1/glm models)
+	httpClient             *http.Client
+	extraBody              map[string]any // Additional fields to inject into request body
+	customHeaders          map[string]string
+	userAgent              string
+	upstreamModelHeader    string // Optional override for the response header reporting the routed model
+	upstreamProviderHeader string // Optional override for the response header reporting the routed provider
 }
 
 type Option func(*Provider)
@@ -108,6 +110,14 @@ func WithProviderName(providerName string) Option {
 	return func(p *Provider) {
 		p.providerName = strings.ToLower(strings.TrimSpace(providerName))
 	}
+}
+
+// SetUpstreamRouteHeaders overrides the response headers used to detect the
+// model and provider a gateway actually routed the request to. Empty values
+// restore auto-detection.
+func (p *Provider) SetUpstreamRouteHeaders(modelHeader, providerHeader string) {
+	p.upstreamModelHeader = strings.TrimSpace(modelHeader)
+	p.upstreamProviderHeader = strings.TrimSpace(providerHeader)
 }
 
 func NewProvider(apiKey, apiBase, proxy string, opts ...Option) *Provider {
@@ -501,7 +511,14 @@ func (p *Provider) Chat(
 		return nil, common.HandleErrorResponse(resp, p.apiBase)
 	}
 
-	return common.ReadAndParseResponse(resp, p.apiBase)
+	route := newUpstreamRouteCapture(resp.Header, p.upstreamModelHeader, p.upstreamProviderHeader)
+	response, err := common.ReadAndParseResponse(resp, p.apiBase)
+	if err != nil {
+		return nil, err
+	}
+	response.UpstreamModel = route.resolveModel(response.UpstreamModel)
+	response.UpstreamProvider = route.resolveProvider()
+	return response, nil
 }
 
 // ChatStream implements streaming via OpenAI-compatible SSE (stream: true).
@@ -577,7 +594,25 @@ func (p *Provider) ChatStreamEvents(
 		return nil, common.HandleErrorResponse(resp, p.apiBase)
 	}
 
-	return parseStreamResponse(ctx, withStreamingReadIdleTimeout(resp.Body, defaultStreamingReadIdleTimeout), onChunk)
+	// Response headers are fully available before the first SSE event, so the
+	// routed model can be attached to the very first chunk.
+	route := newUpstreamRouteCapture(resp.Header, p.upstreamModelHeader, p.upstreamProviderHeader)
+	response, err := parseStreamResponse(
+		ctx,
+		withStreamingReadIdleTimeout(resp.Body, defaultStreamingReadIdleTimeout),
+		route,
+		onChunk,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if response != nil {
+		if response.UpstreamModel == "" {
+			response.UpstreamModel = route.resolveModel("")
+		}
+		response.UpstreamProvider = route.resolveProvider()
+	}
+	return response, nil
 }
 
 func withStreamingReadIdleTimeout(body io.ReadCloser, timeout time.Duration) io.ReadCloser {
@@ -614,9 +649,11 @@ func (b *streamingReadIdleTimeoutBody) Close() error {
 }
 
 // parseStreamResponse parses an OpenAI-compatible SSE stream.
+// route carries gateway routing metadata; it may be nil.
 func parseStreamResponse(
 	ctx context.Context,
 	reader io.Reader,
+	route *upstreamRouteCapture,
 	onChunk func(StreamChunk),
 ) (*LLMResponse, error) {
 	var textContent strings.Builder
@@ -668,6 +705,7 @@ func parseStreamResponse(
 				} `json:"delta"`
 				FinishReason *string `json:"finish_reason"`
 			} `json:"choices"`
+			Model string                 `json:"model"`
 			Usage *UsageInfo             `json:"usage"`
 			Error *common.InBandAPIError `json:"error"`
 		}
@@ -675,6 +713,8 @@ func parseStreamResponse(
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			return fmt.Errorf("failed to decode stream event: %w", err)
 		}
+
+		route.observeBodyModel(chunk.Model)
 
 		// Some providers/gateways report upstream failures inside a 200 stream
 		// (e.g. {"error":{"code":503,"type":"upstream_error"}}). Surface it so
@@ -696,13 +736,13 @@ func parseStreamResponse(
 		if choice.Delta.ReasoningContent != "" {
 			reasoningContent.WriteString(choice.Delta.ReasoningContent)
 			if onChunk != nil {
-				onChunk(StreamChunk{ReasoningContent: reasoningContent.String()})
+				onChunk(upstreamChunk(route, StreamChunk{ReasoningContent: reasoningContent.String()}))
 			}
 		}
 		if choice.Delta.Reasoning != "" {
 			reasoning.WriteString(choice.Delta.Reasoning)
 			if onChunk != nil {
-				onChunk(StreamChunk{ReasoningContent: reasoning.String()})
+				onChunk(upstreamChunk(route, StreamChunk{ReasoningContent: reasoning.String()}))
 			}
 		}
 		if len(choice.Delta.ReasoningDetails) > 0 {
@@ -713,7 +753,7 @@ func parseStreamResponse(
 		if choice.Delta.Content != "" {
 			textContent.WriteString(choice.Delta.Content)
 			if onChunk != nil {
-				onChunk(StreamChunk{Content: textContent.String()})
+				onChunk(upstreamChunk(route, StreamChunk{Content: textContent.String()}))
 			}
 		}
 
@@ -845,6 +885,8 @@ func parseStreamResponse(
 		ToolCalls:        toolCalls,
 		FinishReason:     finishReason,
 		Usage:            usage,
+		UpstreamModel:    route.resolveModel(""),
+		UpstreamProvider: route.resolveProvider(),
 	}, nil
 }
 

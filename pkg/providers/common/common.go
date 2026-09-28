@@ -277,6 +277,7 @@ func ParseResponse(body io.Reader) (*LLMResponse, error) {
 			} `json:"message"`
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
+		Model string          `json:"model"`
 		Usage *UsageInfo      `json:"usage"`
 		Error *InBandAPIError `json:"error"`
 	}
@@ -294,8 +295,9 @@ func ParseResponse(body io.Reader) (*LLMResponse, error) {
 
 	if len(apiResponse.Choices) == 0 {
 		return &LLMResponse{
-			Content:      "",
-			FinishReason: "stop",
+			Content:       "",
+			FinishReason:  "stop",
+			UpstreamModel: apiResponse.Model,
 		}, nil
 	}
 
@@ -358,6 +360,7 @@ func ParseResponse(body io.Reader) (*LLMResponse, error) {
 		ToolCalls:        toolCalls,
 		FinishReason:     normalizeFinishReason(choice.FinishReason),
 		Usage:            apiResponse.Usage,
+		UpstreamModel:    apiResponse.Model,
 	}, nil
 }
 
