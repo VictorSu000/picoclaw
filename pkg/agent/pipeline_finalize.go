@@ -121,6 +121,7 @@ func (p *Pipeline) Finalize(
 		ts.setPhase(TurnPhaseCompleted)
 		return turnResult{
 			finalContent: finalContent,
+			modelName:    exec.modelLabel(),
 			status:       TurnEndStatusError,
 			followUps:    append([]bus.InboundMessage(nil), ts.followUps...),
 		}, streamErr

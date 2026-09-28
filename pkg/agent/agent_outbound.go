@@ -81,6 +81,15 @@ func (al *AgentLoop) PublishResponseIfNeeded(ctx context.Context, channel, chatI
 	if sessionKey != "" {
 		msg.ContextUsage = computeContextUsage(al.agentForSession(sessionKey), sessionKey)
 	}
+	// This is the final response of a non-streamed turn, so it is the only
+	// carrier of the turn's model label: the streamed and interim paths already
+	// stamped model_name on their own payloads.
+	if label := al.takeTurnModelLabel(sessionKey); label != "" {
+		if msg.Context.Raw == nil {
+			msg.Context.Raw = make(map[string]string, 1)
+		}
+		msg.Context.Raw["model_name"] = label
+	}
 	markFinalOutbound(&msg)
 	al.bus.PublishOutbound(ctx, msg)
 	logger.InfoCF("agent", "Published outbound response",

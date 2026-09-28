@@ -72,6 +72,13 @@ type AgentLoop struct {
 	activeTurnStates sync.Map
 	subTurnCounter   atomic.Int64
 
+	// lastTurnModelLabels holds the display label of the most recently finished
+	// turn per session (configured alias plus any gateway-reported route). The
+	// non-streaming final response is published after runAgentLoop returns, so
+	// the label is parked here and consumed by PublishResponseIfNeeded. Entries
+	// are read-once; a new turn overwrites the previous one.
+	lastTurnModelLabels sync.Map
+
 	turnSeq atomic.Uint64
 
 	// activeReqMu/activeReqCond/activeReqCount replace sync.WaitGroup to
@@ -656,7 +663,45 @@ func (al *AgentLoop) runAgentLoop(
 			})
 	}
 
+	al.recordTurnModelLabel(opts.Dispatch.SessionKey, result.modelName)
+
 	return result.finalContent, nil
+}
+
+// recordTurnModelLabel parks the turn's model label for the final outbound
+// publish, which happens after this function returns. It carries the
+// gateway-reported route when the endpoint reports one, so the WebUI can show
+// the routed model next to the configured alias.
+func (al *AgentLoop) recordTurnModelLabel(sessionKey, modelName string) {
+	if al == nil {
+		return
+	}
+	sessionKey = strings.TrimSpace(sessionKey)
+	if sessionKey == "" {
+		return
+	}
+	if label := strings.TrimSpace(modelName); label != "" {
+		al.lastTurnModelLabels.Store(sessionKey, label)
+		return
+	}
+	al.lastTurnModelLabels.Delete(sessionKey)
+}
+
+// takeTurnModelLabel returns and clears the parked label for a session.
+func (al *AgentLoop) takeTurnModelLabel(sessionKey string) string {
+	if al == nil {
+		return ""
+	}
+	sessionKey = strings.TrimSpace(sessionKey)
+	if sessionKey == "" {
+		return ""
+	}
+	if v, ok := al.lastTurnModelLabels.LoadAndDelete(sessionKey); ok {
+		if label, ok := v.(string); ok {
+			return strings.TrimSpace(label)
+		}
+	}
+	return ""
 }
 
 // selectCandidates returns the model candidates and resolved model name to use

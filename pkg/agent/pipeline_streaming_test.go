@@ -1209,3 +1209,80 @@ func runConfiguredStreamingTurn(t *testing.T, al *AgentLoop, channel string) str
 	}
 	return got
 }
+
+// A turn can finish without ever emitting a content delta: the answer may be
+// injected by an AfterLLM hook, fall back to DefaultResponse, or be empty. The
+// final flush must still carry the model label resolved from the LLM response,
+// not the bare alias cached before the first chunk.
+func TestConfiguredStreamingFinalizeUsesResponseModelLabelWithoutContentChunks(t *testing.T) {
+	cfg := newConfiguredStreamingTestConfig(t, true, true, nil)
+	streamer := &modelNameRecordingStreamer{}
+	msgBus := bus.NewMessageBus()
+	msgBus.SetStreamDelegate(configuredStreamingDelegate{streamer: streamer})
+	provider := &configuredStreamingProvider{
+		eventPlan: []configuredStreamingEventCall{{
+			chunks: nil,
+			response: &providers.LLMResponse{
+				Content:          "raw answer",
+				ReasoningContent: "thinking",
+				UpstreamModel:    "claude-sonnet-4-5",
+				UpstreamProvider: "anthropic",
+			},
+		}},
+	}
+	al := NewAgentLoop(cfg, msgBus, provider)
+	if err := al.MountHook(NamedHook("inject-final-content", configuredStreamingAfterHook{
+		content: "hooked answer",
+	})); err != nil {
+		t.Fatalf("MountHook() error = %v", err)
+	}
+
+	got := runConfiguredStreamingTurn(t, al, "pico")
+	if got != "hooked answer" {
+		t.Fatalf("response = %q, want hooked answer", got)
+	}
+	if len(streamer.events) == 0 {
+		t.Fatal("expected the final flush to reach the streamer")
+	}
+	want := "test-model → anthropic/claude-sonnet-4-5"
+	if last := streamer.lastModelName(); last != want {
+		t.Fatalf("final flush model name = %q, want %q", last, want)
+	}
+}
+
+// The gateway-routed model must reach every streamed surface: the reasoning
+// block, the streamed content, and the final flush.
+func TestConfiguredStreamingPropagatesGatewayRouteToEveryStreamedEvent(t *testing.T) {
+	cfg := newConfiguredStreamingTestConfig(t, true, true, nil)
+	streamer := &modelNameRecordingStreamer{}
+	msgBus := bus.NewMessageBus()
+	msgBus.SetStreamDelegate(configuredStreamingDelegate{streamer: streamer})
+	provider := &configuredStreamingProvider{
+		eventPlan: []configuredStreamingEventCall{{
+			chunks: []providers.StreamChunk{
+				{ReasoningContent: "thinking", UpstreamModel: "claude-sonnet-4-5", UpstreamProvider: "anthropic"},
+				{Content: "answer", UpstreamModel: "claude-sonnet-4-5", UpstreamProvider: "anthropic"},
+			},
+			response: &providers.LLMResponse{
+				Content:          "answer",
+				ReasoningContent: "thinking",
+				UpstreamModel:    "claude-sonnet-4-5",
+				UpstreamProvider: "anthropic",
+			},
+		}},
+	}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	if got := runConfiguredStreamingTurn(t, al, "pico"); got != "answer" {
+		t.Fatalf("response = %q, want answer", got)
+	}
+	want := "test-model → anthropic/claude-sonnet-4-5"
+	if len(streamer.names) == 0 {
+		t.Fatal("streamer never received a model name")
+	}
+	for _, name := range streamer.names {
+		if name != want {
+			t.Fatalf("streamer model name = %q, want %q (all sends: %v)", name, want, streamer.events)
+		}
+	}
+}

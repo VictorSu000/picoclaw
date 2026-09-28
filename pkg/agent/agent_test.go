@@ -7594,3 +7594,107 @@ func TestRunWorkerPanicReleasesSessionTurnState(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// The Pico WebUI runs turns with SendResponse=false and streaming off, so the
+// final answer is published by PublishResponseIfNeeded after runAgentLoop has
+// already returned. That publish builds the outbound message from scratch, so
+// it is the only place the turn's model label can be attached for the final
+// answer; thought and tool_calls interim messages carry their own copy.
+func TestPublishResponseIfNeeded_AttachesGatewayRoutedModelToFinalAnswer(t *testing.T) {
+	cfg := newConfiguredStreamingTestConfig(t, false, false, nil)
+	msgBus := bus.NewMessageBus()
+	provider := &configuredStreamingProvider{
+		chatResponse: &providers.LLMResponse{
+			Content:          "final answer",
+			ReasoningContent: "thinking",
+			UpstreamModel:    "claude-sonnet-4-5",
+			UpstreamProvider: "anthropic",
+		},
+	}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	const sessionKey = "agent:main:pico:session-1"
+	response, err := al.processMessage(context.Background(), bus.NormalizeInboundMessage(bus.InboundMessage{
+		Channel:    "pico",
+		ChatID:     "session-1",
+		SessionKey: sessionKey,
+		Content:    "hello",
+		Context:    bus.InboundContext{Channel: "pico", ChatID: "session-1"},
+	}))
+	if err != nil {
+		t.Fatalf("processMessage() error = %v", err)
+	}
+	if response != "final answer" {
+		t.Fatalf("response = %q, want final answer", response)
+	}
+
+	// Same call the steering loop makes right after processMessage returns.
+	al.PublishResponseIfNeeded(context.Background(), "pico", "session-1", sessionKey, response)
+
+	type outbound struct {
+		content   string
+		kind      string
+		modelName string
+	}
+	var got []outbound
+	deadline := time.After(2 * time.Second)
+	for len(got) < 2 {
+		select {
+		case msg := <-msgBus.OutboundChan():
+			got = append(got, outbound{
+				content:   msg.Content,
+				kind:      msg.Context.Raw["message_kind"],
+				modelName: msg.Context.Raw["model_name"],
+			})
+		case <-deadline:
+			t.Fatalf("timed out with outbounds = %+v", got)
+		}
+	}
+
+	want := "test-model → anthropic/claude-sonnet-4-5"
+	if got[0].kind != "thought" || got[0].modelName != want {
+		t.Fatalf("thought outbound = %+v, want model_name %q", got[0], want)
+	}
+	if got[1].kind != "" || got[1].content != "final answer" || got[1].modelName != want {
+		t.Fatalf("final outbound = %+v, want content final answer and model_name %q", got[1], want)
+	}
+}
+
+// Without a gateway-reported route the final answer must keep the bare alias.
+func TestPublishResponseIfNeeded_FallsBackToConfiguredAlias(t *testing.T) {
+	cfg := newConfiguredStreamingTestConfig(t, false, false, nil)
+	msgBus := bus.NewMessageBus()
+	provider := &configuredStreamingProvider{
+		chatResponse: &providers.LLMResponse{Content: "plain answer"},
+	}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	const sessionKey = "agent:main:pico:session-2"
+	response, err := al.processMessage(context.Background(), bus.NormalizeInboundMessage(bus.InboundMessage{
+		Channel:    "pico",
+		ChatID:     "session-2",
+		SessionKey: sessionKey,
+		Content:    "hello",
+		Context:    bus.InboundContext{Channel: "pico", ChatID: "session-2"},
+	}))
+	if err != nil {
+		t.Fatalf("processMessage() error = %v", err)
+	}
+	al.PublishResponseIfNeeded(context.Background(), "pico", "session-2", sessionKey, response)
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case msg := <-msgBus.OutboundChan():
+			if msg.Content != "plain answer" {
+				continue
+			}
+			if got := msg.Context.Raw["model_name"]; got != "test-model" {
+				t.Fatalf("final model_name = %q, want %q", got, "test-model")
+			}
+			return
+		case <-deadline:
+			t.Fatal("timed out waiting for the final outbound message")
+		}
+	}
+}

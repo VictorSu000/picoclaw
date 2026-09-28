@@ -236,7 +236,9 @@ func finalizeConfiguredStreamingLLM(
 	publisher := exec.streamingPublisher
 	exec.streamingPublisher = nil
 	visibleBeforeFinalize := publisher.Published()
-	if err := publisher.Finalize(ctx, content, contextUsage); err != nil {
+	// exec.modelLabel() is resolved from the response of the call that produced
+	// this content, so it stays correct even when no chunk ever arrived.
+	if err := publisher.Finalize(ctx, content, contextUsage, exec.modelLabel()); err != nil {
 		if visibleBeforeFinalize {
 			logger.WarnCF("agent", "stream final flush failed after visible output", map[string]any{
 				"agent_id": ts.agent.ID,
@@ -490,12 +492,26 @@ func (p *streamingChunkPublisher) upstreamProvider() string {
 	return p.upstreamProviderSlug
 }
 
-func (p *streamingChunkPublisher) Finalize(ctx context.Context, content string, contextUsage *bus.ContextUsage) error {
+// Finalize flushes the final content. modelLabel is the label resolved from the
+// LLM response that produced this content; it is authoritative because a turn
+// can finish without ever emitting a content delta (empty answer, content
+// injected by an AfterLLM hook, DefaultResponse fallback), in which case the
+// chunk callback never ran and the cached name would still be the bare alias.
+// An empty modelLabel keeps the cached name.
+func (p *streamingChunkPublisher) Finalize(
+	ctx context.Context,
+	content string,
+	contextUsage *bus.ContextUsage,
+	modelLabel string,
+) error {
 	if p == nil || p.streamer == nil {
 		return nil
 	}
 	if strings.TrimSpace(content) == "" && !p.published {
 		return nil
+	}
+	if label := strings.TrimSpace(modelLabel); label != "" {
+		p.modelName = label
 	}
 	if setter, ok := p.streamer.(interface{ SetModelName(modelName string) }); ok {
 		setter.SetModelName(p.modelName)
