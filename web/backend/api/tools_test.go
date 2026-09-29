@@ -77,8 +77,8 @@ func TestHandleListTools(t *testing.T) {
 	if gotTools["send_tts"].Status != "blocked" || gotTools["send_tts"].ReasonCode != "requires_tts_provider" {
 		t.Fatalf("send_tts = %#v, want blocked/requires_tts_provider", gotTools["send_tts"])
 	}
-	if gotTools["load_image"].Status != "disabled" || !gotTools["load_image"].Configurable {
-		t.Fatalf("load_image = %#v, want disabled/configurable", gotTools["load_image"])
+	if gotTools["load_image"].Status != "enabled" || !gotTools["load_image"].Configurable {
+		t.Fatalf("load_image = %#v, want enabled/configurable", gotTools["load_image"])
 	}
 	if gotTools["delegate"].Status != "blocked" || gotTools["delegate"].ReasonCode != "requires_multi_agent" {
 		t.Fatalf("delegate = %#v, want blocked/requires_multi_agent", gotTools["delegate"])

@@ -136,7 +136,7 @@ toolLoop:
 				return false
 			}
 			exec.allResponsesHandled = false
-			denyContent := fmt.Sprintf("Tool %q is not allowed by the active turn policy or agent preset.", toolName)
+			denyContent := turnToolDeniedMessage(toolName)
 			al.emitEvent(
 				runtimeevents.KindAgentToolExecSkipped,
 				ts.eventMeta("runTurn", "turn.tool.skipped"),

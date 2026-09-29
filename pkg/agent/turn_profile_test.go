@@ -1114,7 +1114,7 @@ func TestTurnProfile_ToolExecutionRejectsDisallowedToolCalls(t *testing.T) {
 	var foundDeniedResult bool
 	for _, msg := range provider.messages {
 		if msg.Role == "tool" &&
-			strings.Contains(msg.Content, "not allowed by the active turn profile") {
+			strings.Contains(msg.Content, turnToolDeniedMessage("echo_text_rewritten")) {
 			foundDeniedResult = true
 			break
 		}
@@ -1167,7 +1167,7 @@ func TestTurnProfile_BeforeToolRespondCannotBypassDisallowedTool(t *testing.T) {
 		if strings.Contains(msg.Content, "hook bypassed profile") {
 			t.Fatalf("hook respond result bypassed turn profile: %#v", provider.messages)
 		}
-		if strings.Contains(msg.Content, "not allowed by the active turn profile") {
+		if strings.Contains(msg.Content, turnToolDeniedMessage("echo_text_rewritten")) {
 			foundDeniedResult = true
 		}
 	}

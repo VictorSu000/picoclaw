@@ -41,6 +41,9 @@ func TestNormalizeGeneratedSessionTitle(t *testing.T) {
 		{name: "label and quotes", input: `Title: "A short title"`, want: "A short title"},
 		{name: "chinese label", input: "标题：会话自动标题\n这里是解释", want: "会话自动标题"},
 		{name: "markdown", input: "## `Model configuration`", want: "Model configuration"},
+		{name: "markdown bold", input: "**Model configuration**", want: "Model configuration"},
+		{name: "markdown quote", input: "> Model configuration", want: "Model configuration"},
+		{name: "markdown mixed", input: "## **Model configuration**", want: "Model configuration"},
 		{name: "empty", input: " \n ", want: ""},
 	}
 

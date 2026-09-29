@@ -301,6 +301,10 @@ func toolAllowedForTurn(
 	return turnProfileToolAllowed(turnPolicy, name) && agentPresetToolAllowed(agent, preset, name)
 }
 
+func turnToolDeniedMessage(name string) string {
+	return fmt.Sprintf("Tool %q is not allowed by the active turn policy or agent preset.", name)
+}
+
 func filterToolsForTurn(
 	agent *AgentInstance,
 	defs []providers.ToolDefinition,

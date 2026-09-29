@@ -159,7 +159,14 @@ func normalizeGeneratedSessionTitle(value string) string {
 			break
 		}
 	}
-	title = strings.TrimSpace(strings.Trim(title, "`*#\"'“”‘’「」『』"))
+	for {
+		trimmed := strings.TrimLeft(strings.TrimLeft(title, "#*>+-"), " ")
+		trimmed = strings.TrimSpace(strings.Trim(trimmed, "`*#\"'“”‘’「」『』"))
+		if trimmed == title {
+			break
+		}
+		title = trimmed
+	}
 	title = strings.Join(strings.Fields(title), " ")
 	if title == "" {
 		return ""

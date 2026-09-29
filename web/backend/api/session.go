@@ -529,6 +529,19 @@ func isEmptySession(sess sessionFile) bool {
 	return len(sess.Messages) == 0 && strings.TrimSpace(sess.Summary) == ""
 }
 
+// sessionHasTranscript reports whether a session has an on-disk message file.
+// Metadata-only entries (category/preset pre-creation, or orphans left behind by
+// a crash) are not listable sessions. Mirrors the structural check in
+// collectOrphanSessionMetas.
+func sessionHasTranscript(dir string, sessionKey string) bool {
+	base := filepath.Join(dir, sanitizeSessionKey(sessionKey))
+	if exists, _ := fileExists(base + ".jsonl"); exists {
+		return true
+	}
+	exists, _ := fileExists(base + ".archive.jsonl")
+	return exists
+}
+
 func truncateRunes(s string, maxLen int) string {
 	if maxLen <= 0 {
 		return ""
@@ -921,7 +934,7 @@ func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	if refs, findErr := h.findPicoJSONLSessions(dir); findErr == nil {
 		for _, ref := range refs {
 			sess, loadErr := h.readJSONLSession(dir, ref.Key)
-			if loadErr != nil || isEmptySession(sess) {
+			if loadErr != nil || isEmptySession(sess) || !sessionHasTranscript(dir, ref.Key) {
 				continue
 			}
 			seen[ref.ID] = struct{}{}

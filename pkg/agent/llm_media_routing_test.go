@@ -41,6 +41,12 @@ func mediaRoutingTestState(t *testing.T, primaryTags []string) (*Pipeline, *turn
 		Model:                    "primary-model",
 		Candidates:               primary,
 		VisionFallbackCandidates: visionFallback,
+		// routeMediaTurn resolves the media provider from the registry, mirroring
+		// the wiring NewAgentInstance does for vision fallback models.
+		CandidateProviders: map[string]providers.LLMProvider{
+			providers.ModelKey("openai", "primary-model"):   mediaRoutingTestProvider{},
+			providers.ModelKey("openai", "vision-fallback"): mediaRoutingTestProvider{},
+		},
 	}
 	exec := &turnExecution{
 		activeCandidates:  primary,
