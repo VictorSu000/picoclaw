@@ -130,6 +130,43 @@ var (
 		substr("request too large"),
 	}
 
+	// In-band failures arrive inside HTTP 200 bodies, so the provider has
+	// already told us the request produced no completion. Only the cases where
+	// resending the identical request cannot possibly help are listed here;
+	// everything else is treated as transient by classifyInBandError.
+	// Enumerating the retryable side instead would break every time a gateway
+	// introduces a new error code.
+	inBandFormatPatterns = []errorPattern{
+		rxp(`invalid[_ ]request[_ ]error`),
+		rxp(`unsupported[_ ](?:parameter|model|feature|value)`),
+		rxp(`invalid[_ ]model`),
+		rxp(`model[_ ](?:not[_ ]found|does[_ ]not[_ ]exist)`),
+		rxp(`content[_ ]filter`),
+		rxp(`content[_ ]policy`),
+		// A non-numeric code never reaches here when it parses as a status, but
+		// gateways sometimes spell the status out in the message text.
+		rxp(`\b(?:400|404|405|413|415|422)\b`),
+	}
+
+	inBandAuthPatterns = []errorPattern{
+		rxp(`invalid[_ ]api[_ ]key`),
+		rxp(`authentication[_ ]error`),
+		rxp(`permission[_ ]error`),
+		rxp(`permission[_ ]denied`),
+		substr("invalid api key"),
+		substr("unauthorized"),
+		substr("forbidden"),
+		rxp(`\b(?:401|403)\b`),
+	}
+
+	inBandBillingPatterns = []errorPattern{
+		rxp(`insufficient[_ ]quota`),
+		rxp(`billing`),
+		rxp(`\b402\b`),
+		substr("payment required"),
+		substr("insufficient credits"),
+	}
+
 	imageDimensionPatterns = []errorPattern{
 		rxp(`image dimensions exceed max`),
 	}
@@ -207,6 +244,7 @@ func ClassifyError(err error, provider, model string) *FailoverError {
 	// In-band errors embedded in HTTP 200 bodies carry their own status code.
 	var inBandErr *common.InBandAPIError
 	if errors.As(err, &inBandErr) && inBandErr != nil {
+		// A numeric code that maps onto a known HTTP status wins outright.
 		if code := inBandErr.StatusCode(); code > 0 {
 			if reason := classifyByStatus(code); reason != "" {
 				return &FailoverError{
@@ -216,6 +254,18 @@ func ClassifyError(err error, provider, model string) *FailoverError {
 					Status:   code,
 					Wrapped:  err,
 				}
+			}
+		}
+		// Otherwise the code is non-numeric ("upstream_error") or is not a
+		// status at all (42.5, 999, 200). Classify from the error's own fields
+		// so the failure still reaches the retry and fallback paths.
+		if reason := classifyInBandError(inBandErr); reason != "" {
+			return &FailoverError{
+				Reason:   reason,
+				Provider: provider,
+				Model:    model,
+				Status:   inBandErr.StatusCode(),
+				Wrapped:  err,
 			}
 		}
 	}
@@ -277,6 +327,45 @@ func classifyByErrorType(err error) FailoverReason {
 	}
 
 	return ""
+}
+
+// classifyInBandError classifies an HTTP 200 body error whose "code" field is
+// not a numeric status.
+//
+// The provider reported the error inside a successful HTTP response, which
+// means no usable completion was produced. Because gateway error taxonomies
+// change constantly and cannot be enumerated up front, this fails open: only
+// failures that a plain resend provably cannot fix are rejected, and every
+// other code is treated as a transient upstream fault so it still reaches the
+// retry and fallback paths.
+func classifyInBandError(e *common.InBandAPIError) FailoverReason {
+	if e == nil {
+		return ""
+	}
+	fields := []string{e.Type, e.Message}
+	if s, ok := e.Code.(string); ok {
+		fields = append(fields, s)
+	}
+	msg := strings.ToLower(strings.Join(fields, " "))
+
+	switch {
+	// Needs history compaction, not a blind resend.
+	case matchesAny(msg, contextOverflowPatterns):
+		return FailoverContextOverflow
+	// Resending the identical request will fail identically.
+	case matchesAny(msg, inBandFormatPatterns):
+		return FailoverFormat
+	// Same credentials, same outcome; only a different candidate can help.
+	case matchesAny(msg, inBandAuthPatterns):
+		return FailoverAuth
+	case matchesAny(msg, inBandBillingPatterns):
+		return FailoverBilling
+	// Kept explicit so the retry event is labelled rate_limit rather than
+	// server_error, and so the candidate lands in a rate-limit cooldown.
+	case matchesAny(msg, rateLimitPatterns):
+		return FailoverRateLimit
+	}
+	return FailoverTimeout
 }
 
 // classifyByStatus maps HTTP status codes to FailoverReason.

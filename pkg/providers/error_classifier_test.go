@@ -36,6 +36,129 @@ func TestClassifyError_InBandAPIError(t *testing.T) {
 	}
 }
 
+// Gateways report upstream failures in HTTP 200 bodies with a non-numeric
+// code, which cannot be mapped through classifyByStatus. Because the provider
+// has already reported a failure, unknown codes must still be classified so
+// the retry and fallback paths are reached.
+func TestClassifyError_InBandNonNumericCode(t *testing.T) {
+	tests := []struct {
+		name string
+		err  *common.InBandAPIError
+		want FailoverReason
+	}{
+		{
+			name: "upstream error string code",
+			err:  common.NewInBandAPIError("upstream_error", "upstream_error", "upstream_error"),
+			want: FailoverTimeout,
+		},
+		{
+			name: "internal error string code",
+			err:  common.NewInBandAPIError("internal_error", "internal_error", "internal_error"),
+			want: FailoverTimeout,
+		},
+		{
+			name: "service unavailable",
+			err:  common.NewInBandAPIError("service_unavailable", "backend is down", "api_error"),
+			want: FailoverTimeout,
+		},
+		{
+			name: "nil code with transient type",
+			err:  common.NewInBandAPIError(nil, "upstream failure", "upstream_error"),
+			want: FailoverTimeout,
+		},
+		{
+			name: "unknown vendor code defaults to transient",
+			err:  common.NewInBandAPIError("acme_gateway_failure_9000", "request could not be served", "acme_error"),
+			want: FailoverTimeout,
+		},
+		{
+			name: "unrecognised free-form message defaults to transient",
+			err:  common.NewInBandAPIError(nil, "the backend fell over", ""),
+			want: FailoverTimeout,
+		},
+		{
+			name: "rate limit type",
+			err:  common.NewInBandAPIError(nil, "too many requests", "rate_limit_error"),
+			want: FailoverRateLimit,
+		},
+		{
+			name: "context overflow type",
+			err:  common.NewInBandAPIError(nil, "context_length_exceeded", "invalid_request_error"),
+			want: FailoverContextOverflow,
+		},
+		{
+			name: "auth type",
+			err:  common.NewInBandAPIError(nil, "invalid api key", "authentication_error"),
+			want: FailoverAuth,
+		},
+		{
+			name: "billing type",
+			err:  common.NewInBandAPIError(nil, "insufficient_quota", "billing_error"),
+			want: FailoverBilling,
+		},
+		{
+			name: "bad request is not retried",
+			err:  common.NewInBandAPIError("bad_prompt", "unsupported parameter", "invalid_request_error"),
+			want: FailoverFormat,
+		},
+		{
+			name: "content policy is not retried",
+			err:  common.NewInBandAPIError("content_filter", "blocked by content policy", "content_filter_error"),
+			want: FailoverFormat,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ClassifyError(fmt.Errorf("wrapped: %w", tt.err), "openai", "glm-5.2")
+			if result == nil {
+				t.Fatalf("ClassifyError() = nil, want %q", tt.want)
+			}
+			if result.Reason != tt.want {
+				t.Errorf("Reason = %q, want %q", result.Reason, tt.want)
+			}
+		})
+	}
+}
+
+// Whatever a gateway invents, an in-band failure must be classified as something
+// rather than leaking through as unclassifiable and aborting the turn.
+func TestClassifyError_InBandNeverUnclassifiable(t *testing.T) {
+	codes := []any{
+		"upstream_error", "weird_vendor_code", "x", "", 42.5, nil, true,
+		[]any{"nested"},
+		map[string]any{"k": "v"},
+	}
+	for _, code := range codes {
+		err := common.NewInBandAPIError(code, "some failure", "some_type")
+		result := ClassifyError(err, "openai", "glm-5.2")
+		if result == nil {
+			t.Errorf("code %#v: ClassifyError() = nil, want a classified reason", code)
+		}
+	}
+}
+
+// A numeric code must still win over text matching.
+func TestClassifyError_InBandNumericCodeTakesPrecedence(t *testing.T) {
+	err := common.NewInBandAPIError(401, "upstream_error", "upstream_error")
+	result := ClassifyError(err, "openai", "glm-5.2")
+	if result == nil {
+		t.Fatal("ClassifyError() = nil, want classified")
+	}
+	if result.Status != 401 {
+		t.Errorf("Status = %d, want 401", result.Status)
+	}
+	if result.Reason != FailoverAuth {
+		t.Errorf("Reason = %q, want %q", result.Reason, FailoverAuth)
+	}
+}
+
+func TestClassifyInBandError_Nil(t *testing.T) {
+	if reason := classifyInBandError(nil); reason != "" {
+		t.Errorf("classifyInBandError(nil) = %q, want empty", reason)
+	}
+}
+
 func TestClassifyError_Nil(t *testing.T) {
 	result := ClassifyError(nil, "openai", "gpt-4")
 	if result != nil {

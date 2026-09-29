@@ -1585,6 +1585,67 @@ func TestProviderChatStream_InBandError(t *testing.T) {
 	}
 }
 
+func TestProviderChat_InBandErrorNonNumericCode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(
+			`{"error":{"message":"upstream_error","type":"upstream_error","param":"","code":"upstream_error"}}`,
+		))
+	}))
+	defer server.Close()
+
+	p := NewProvider("key", server.URL, "")
+	out, err := p.Chat(
+		t.Context(),
+		[]Message{{Role: "user", Content: "hi"}},
+		nil,
+		"glm-5.2",
+		nil,
+	)
+	if err == nil {
+		t.Fatalf("Chat() error = nil, want in-band error; response: %#v", out)
+	}
+	var inBandErr *common.InBandAPIError
+	if !errors.As(err, &inBandErr) {
+		t.Fatalf("Chat() error = %v, want *common.InBandAPIError", err)
+	}
+	if got := inBandErr.StatusCode(); got != 0 {
+		t.Errorf("StatusCode() = %d, want 0 (non-numeric code)", got)
+	}
+}
+
+func TestProviderChatStream_InBandErrorNonNumericCode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"error\":{\"message\":\"upstream_error\",\"type\":\"upstream_error\",\"param\":\"\",\"code\":\"upstream_error\"}}\n\n",
+		))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	p := NewProvider("key", server.URL, "")
+	out, err := p.ChatStream(
+		t.Context(),
+		[]Message{{Role: "user", Content: "hi"}},
+		nil,
+		"glm-5.2",
+		nil,
+		nil,
+	)
+	if err == nil {
+		t.Fatalf("ChatStream() error = nil, want in-band error; response: %#v", out)
+	}
+	var inBandErr *common.InBandAPIError
+	if !errors.As(err, &inBandErr) {
+		t.Fatalf("ChatStream() error = %v, want *common.InBandAPIError", err)
+	}
+	if got := inBandErr.StatusCode(); got != 0 {
+		t.Errorf("StatusCode() = %d, want 0 (non-numeric code)", got)
+	}
+}
+
 func TestProviderChatStream_ParsesReasoningContent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

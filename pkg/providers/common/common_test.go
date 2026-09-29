@@ -342,6 +342,31 @@ func TestParseResponse_InBandError(t *testing.T) {
 	}
 }
 
+// Gateways sometimes return HTTP 200 with a non-numeric error code, e.g.
+// {"error":{"message":"upstream_error","type":"upstream_error","code":"upstream_error"}}.
+// This must still surface as an error (not a silent empty completion) so the
+// retry and fallback logic can act on it.
+func TestParseResponse_InBandErrorNonNumericCode(t *testing.T) {
+	body := `{"error":{"message":"upstream_error","type":"upstream_error","param":"","code":"upstream_error"}}`
+	out, err := ParseResponse(strings.NewReader(body))
+	if err == nil {
+		t.Fatalf("ParseResponse() error = nil, want in-band error; response: %#v", out)
+	}
+	var inBandErr *InBandAPIError
+	if !errors.As(err, &inBandErr) {
+		t.Fatalf("ParseResponse() error = %v, want *InBandAPIError", err)
+	}
+	if got := inBandErr.StatusCode(); got != 0 {
+		t.Errorf("StatusCode() = %d, want 0 (non-numeric code)", got)
+	}
+	if inBandErr.Type != "upstream_error" {
+		t.Errorf("Type = %q, want %q", inBandErr.Type, "upstream_error")
+	}
+	if inBandErr.Message != "upstream_error" {
+		t.Errorf("Message = %q, want %q", inBandErr.Message, "upstream_error")
+	}
+}
+
 func TestParseResponse_NullErrorIgnored(t *testing.T) {
 	body := `{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"error":null}`
 	out, err := ParseResponse(strings.NewReader(body))

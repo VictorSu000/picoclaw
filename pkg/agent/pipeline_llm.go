@@ -13,6 +13,7 @@ import (
 	runtimeevents "github.com/sipeed/picoclaw/pkg/events"
 	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/providers"
+	"github.com/sipeed/picoclaw/pkg/providers/common"
 	"github.com/sipeed/picoclaw/pkg/utils"
 )
 
@@ -284,6 +285,7 @@ func (p *Pipeline) CallLLM(
 
 	// Retry loop
 	var err error
+	attempts := 0
 	maxRetries := p.Cfg.Agents.Defaults.MaxLLMRetries
 	if maxRetries <= 0 {
 		maxRetries = 2
@@ -293,15 +295,17 @@ func (p *Pipeline) CallLLM(
 		backoffSecs = 2
 	}
 	for retry := 0; retry <= maxRetries; retry++ {
+		attempts = retry + 1
 		exec.emptyAfterRetries = false
 		exec.response, err = callLLM(exec.callMessages, exec.providerToolDefs)
 		if err == nil {
 			// Check for empty response (no content, no reasoning, no tool calls).
-			// Retry regardless of streaming as long as nothing visible was already
-			// published to the user — an empty response never publishes output.
-			if exec.response != nil && isLLMResponseEmpty(exec.response) && !streamingPublisherVisible(exec.streamingPublisher) {
+			// A nil response counts as empty: providers that fail to produce a
+			// completion sometimes return (nil, nil). Retry regardless of
+			// streaming as long as nothing visible was already published to the
+			// user — an empty response never publishes output.
+			if isLLMResponseEmpty(exec.response) && !streamingPublisherVisible(exec.streamingPublisher) {
 				if retry < maxRetries {
-					cancelConfiguredStreamingLLM(turnCtx, exec)
 					cancelConfiguredStreamingLLM(turnCtx, exec)
 					backoff := time.Duration(retry+1) * time.Duration(backoffSecs) * time.Second
 					al.emitEvent(
@@ -540,9 +544,13 @@ func (p *Pipeline) CallLLM(
 				"agent_id":  ts.agent.ID,
 				"iteration": iteration,
 				"model":     exec.llmModel,
+				"attempts":  attempts,
 				"error":     err.Error(),
 			})
-		return ControlBreak, fmt.Errorf("LLM call failed after retries: %w", err)
+		if attempts > 1 {
+			return ControlBreak, fmt.Errorf("LLM call failed after %d attempts: %w", attempts, err)
+		}
+		return ControlBreak, fmt.Errorf("LLM call failed: %w", err)
 	}
 
 	// AfterLLM hook
@@ -793,6 +801,19 @@ func providerForFallbackCandidate(
 	return activeProvider, nil
 }
 
+// isInBandGatewayError reports whether err is a gateway failure reported inside
+// an HTTP 200 body (e.g. {"error":{"code":"upstream_error","type":"upstream_error"}})
+// rather than a transport-level HTTP failure. Such errors are server-side
+// faults even when the body carries no usable status to prove it.
+func isInBandGatewayError(err error) bool {
+	var inBandErr *common.InBandAPIError
+	if !errors.As(err, &inBandErr) || inBandErr == nil {
+		return false
+	}
+	// 408 stays a genuine client-side timeout even when reported in-band.
+	return inBandErr.StatusCode() != 408
+}
+
 func transientLLMRetryReason(err error) (string, bool) {
 	if err == nil {
 		return "", false
@@ -801,7 +822,10 @@ func transientLLMRetryReason(err error) (string, bool) {
 	if failErr := providers.ClassifyError(err, "", ""); failErr != nil {
 		switch failErr.Reason {
 		case providers.FailoverTimeout:
-			if failErr.Status >= 500 {
+			// A gateway failure reported in-band is classified from its
+			// type/message text and may carry no usable status, so it is a
+			// server fault rather than a client timeout.
+			if failErr.Status >= 500 || isInBandGatewayError(err) {
 				return "server_error", true
 			}
 			return "timeout", true
