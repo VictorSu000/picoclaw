@@ -15,6 +15,11 @@ const (
 	sessionTitleTimeout       = 300 * time.Second
 	sessionTitleMaxRunes      = 60
 	sessionTitleInputMaxRunes = 2000
+	// sessionTitleMaxTokens is an upper bound, not a target. Reasoning models
+	// spend most of their budget on thinking, so a tight cap can truncate the
+	// reply before the title itself is emitted. The prompt still bounds the
+	// title, and normalizeGeneratedSessionTitle caps it at sessionTitleMaxRunes.
+	sessionTitleMaxTokens = 2048
 )
 
 const sessionTitleSystemPrompt = `Generate a concise title for the conversation below.
@@ -100,7 +105,7 @@ func (al *AgentLoop) scheduleSessionTitle(
 			},
 			nil,
 			modelID,
-			map[string]any{"max_tokens": 64, "temperature": 0.2},
+			map[string]any{"max_tokens": sessionTitleMaxTokens, "temperature": 0.2},
 		)
 		if err != nil {
 			logger.WarnCF("agent", "Session title generation failed", map[string]any{
