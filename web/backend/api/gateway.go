@@ -369,6 +369,17 @@ func (h *Handler) TryAutoStartGateway() {
 
 // gatewayStartReady validates whether current config can start the gateway.
 func (h *Handler) gatewayStartReady() (bool, string, error) {
+	return h.gatewayStartReadiness(true)
+}
+
+// gatewayStartReadyWithoutProbe validates start preconditions without
+// performing local model reachability probes. It is used for status polling so
+// repeated status requests do not hit the upstream /models endpoint.
+func (h *Handler) gatewayStartReadyWithoutProbe() (bool, string, error) {
+	return h.gatewayStartReadiness(false)
+}
+
+func (h *Handler) gatewayStartReadiness(checkReachability bool) (bool, string, error) {
 	cfg, err := config.LoadConfig(h.configPath)
 	if err != nil {
 		return false, "", fmt.Errorf("failed to load config: %w", err)
@@ -390,7 +401,7 @@ func (h *Handler) gatewayStartReady() (bool, string, error) {
 	if !hasModelConfiguration(modelCfg) {
 		return false, fmt.Sprintf("default model %q has no credentials configured", modelName), nil
 	}
-	if requiresRuntimeProbe(modelCfg) && !probeLocalModelAvailability(modelCfg) {
+	if checkReachability && requiresRuntimeProbe(modelCfg) && !probeLocalModelAvailability(modelCfg) {
 		return false, fmt.Sprintf("default model %q is not reachable", modelName), nil
 	}
 
@@ -1535,7 +1546,7 @@ func (h *Handler) gatewayStatusData() map[string]any {
 		gatewayStatus,
 	)
 
-	ready, reason, readyErr := h.gatewayStartReady()
+	ready, reason, readyErr := h.gatewayStartReadyWithoutProbe()
 	if readyErr != nil {
 		data["gateway_start_allowed"] = false
 		data["gateway_start_reason"] = readyErr.Error()
