@@ -57,6 +57,9 @@ RUN sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list.d/debi
   ca-certificates \
   curl \
   git \
+  gcc \
+  make \
+  libc6-dev \
   python3 \
   python3-pip \
   python3.11-venv \
@@ -93,6 +96,12 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 # Copy binary
 COPY --from=builder /src/build/picoclaw /usr/local/bin/picoclaw
 COPY --from=builder /src/build/picoclaw-launcher /usr/local/bin/picoclaw-launcher
+
+# Go build environment (toolchain copied from builder stage)
+ENV GOPATH=/root/go \
+    GOPROXY=https://goproxy.cn,direct
+ENV PATH=/usr/local/go/bin:${PATH}
+COPY --from=builder /usr/local/go /usr/local/go
 
 ENTRYPOINT ["picoclaw-launcher"]
 CMD ["-console", "-public", "-no-browser"]
