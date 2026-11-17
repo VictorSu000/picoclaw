@@ -5,22 +5,23 @@ import {
   IconCopy,
   IconTool,
 } from "@tabler/icons-react"
+import "katex/dist/katex.min.css"
 import { memo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import ReactMarkdown from "react-markdown"
 import rehypeHighlight from "rehype-highlight"
+import rehypeKatex from "rehype-katex"
 import rehypeRaw from "rehype-raw"
 import rehypeSanitize from "rehype-sanitize"
 import remarkGfm from "remark-gfm"
+import remarkMath from "remark-math"
 
 import { FileAttachmentList } from "@/components/chat/file-attachment-list"
-import {
-  MessageCodeBlock,
-  MarkdownCodeBlock,
-} from "@/components/chat/message-code-block"
+import { MarkdownCodeBlock } from "@/components/chat/markdown-code-block"
+import { MessageCodeBlock } from "@/components/chat/message-code-block"
 import { Button } from "@/components/ui/button"
-import { formatMessageTime } from "@/hooks/use-pico-chat"
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
+import { formatMessageTime } from "@/hooks/use-pico-chat"
 import { cn } from "@/lib/utils"
 import {
   type AssistantMessageKind,
@@ -76,18 +77,14 @@ export const AssistantMessage = memo(function AssistantMessage({
       {modelLabel.routed && (
         <>
           <span className="opacity-50">→</span>
-          <span
-            className="text-muted-foreground/70"
-            title={modelLabel.routed}
-          >
+          <span className="text-muted-foreground/70" title={modelLabel.routed}>
             {modelLabel.routed}
           </span>
         </>
       )}
     </>
   )
-  const hasModelLabel =
-    modelLabel.configured !== "" || modelLabel.routed !== ""
+  const hasModelLabel = modelLabel.configured !== "" || modelLabel.routed !== ""
 
   return (
     <div className="group flex w-full flex-col gap-1.5">
@@ -112,7 +109,7 @@ export const AssistantMessage = memo(function AssistantMessage({
             <Button
               variant="ghost"
               size="icon"
-              className="hover:bg-transparent hover:text-foreground h-6 w-6 opacity-60 md:hidden"
+              className="hover:text-foreground h-6 w-6 opacity-60 hover:bg-transparent md:hidden"
               onClick={() => void copy(content)}
               aria-label={copyMessageLabel}
               title={copyMessageLabel}
@@ -195,10 +192,11 @@ export const AssistantMessage = memo(function AssistantMessage({
                         </div>
                         <div className="prose dark:prose-invert prose-p:my-1.5 prose-p:whitespace-pre-wrap max-w-none text-[13px] leading-relaxed [overflow-wrap:anywhere] break-words opacity-75">
                           <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
+                            remarkPlugins={[remarkGfm, remarkMath]}
                             rehypePlugins={[
                               rehypeRaw,
                               rehypeSanitize,
+                              rehypeKatex,
                               rehypeHighlight,
                             ]}
                             components={{
@@ -231,7 +229,9 @@ export const AssistantMessage = memo(function AssistantMessage({
                             <MessageCodeBlock
                               code={toolArguments}
                               language="json"
-                              label={toolName || t("chat.toolCallArgumentsLabel")}
+                              label={
+                                toolName || t("chat.toolCallArgumentsLabel")
+                              }
                               className="my-0 shadow-none"
                               bodyClassName="px-3 py-2 text-[12px] leading-relaxed"
                             />
@@ -254,8 +254,13 @@ export const AssistantMessage = memo(function AssistantMessage({
               )}
             >
               <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                rehypePlugins={[rehypeRaw, rehypeSanitize, rehypeHighlight]}
+                remarkPlugins={[remarkGfm, remarkMath]}
+                rehypePlugins={[
+                  rehypeRaw,
+                  rehypeSanitize,
+                  rehypeKatex,
+                  rehypeHighlight,
+                ]}
                 components={{
                   pre: MarkdownCodeBlock,
                 }}

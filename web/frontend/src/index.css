@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/inter";
+@import "katex/dist/katex.min.css";
 @plugin "@tailwindcss/typography";
 
 @custom-variant dark (&:is(.dark *));
@@ -155,6 +156,22 @@
 
 [data-slot="sidebar-gap"] {
   height: calc(100svh - 3.5rem);
+}
+
+/* Let wide LaTeX equations scroll instead of overflowing the bubble */
+.katex-display {
+  padding-bottom: 0.25rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* Footnotes section rendered by remark-gfm */
+[data-footnotes] {
+  margin-top: 1.5rem;
+  border-top: 1px solid color-mix(in oklab, var(--border) 40%, transparent);
+  padding-top: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--muted-foreground);
 }
 
 /* Typing indicator animations */

@@ -8,15 +8,15 @@ import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import ReactMarkdown from "react-markdown"
 import rehypeHighlight from "rehype-highlight"
+import rehypeKatex from "rehype-katex"
 import rehypeRaw from "rehype-raw"
 import rehypeSanitize from "rehype-sanitize"
 import remarkGfm from "remark-gfm"
+import remarkMath from "remark-math"
 
 import type { SkillDetailResponse, SkillSupportItem } from "@/api/skills"
-import {
-  MarkdownCodeBlock,
-  MessageCodeBlock,
-} from "@/components/chat/message-code-block"
+import { MarkdownCodeBlock } from "@/components/chat/markdown-code-block"
+import { MessageCodeBlock } from "@/components/chat/message-code-block"
 import {
   Sheet,
   SheetContent,
@@ -178,8 +178,13 @@ export function DetailSheet({
               {detailView === "preview" ? (
                 <div className="prose prose-zinc dark:prose-invert prose-sm sm:prose-base prose-pre:rounded-xl prose-pre:border prose-pre:border-border/40 prose-pre:bg-zinc-100 prose-pre:p-0 prose-pre:shadow-sm dark:prose-pre:bg-zinc-950/90 prose-headings:tracking-tight prose-a:text-primary prose-a:no-underline hover:prose-a:underline max-w-none">
                   <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    rehypePlugins={[rehypeRaw, rehypeSanitize, rehypeHighlight]}
+                    remarkPlugins={[remarkGfm, remarkMath]}
+                    rehypePlugins={[
+                      rehypeRaw,
+                      rehypeSanitize,
+                      rehypeKatex,
+                      rehypeHighlight,
+                    ]}
                     components={{
                       pre: MarkdownCodeBlock,
                     }}
